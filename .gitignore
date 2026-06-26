@@ -1,0 +1,12 @@
+# Claude Code local settings (not shared)
+.claude/settings.json
+
+# Plugin runtime - not committed; installed by Claude Code from this repo's marketplace
+long-term-memory/.claude-plugin/plugin.lock  # or whatever lock file Claude creates
+
+# Node modules inside plugin
+long-term-memory/mcp-server/node_modules/
+
+# Logs and OS files
+*.log
+.DS_Store

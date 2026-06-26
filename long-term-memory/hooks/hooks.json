@@ -1,0 +1,16 @@
+{
+  "description": "SessionStart bootstrap for LTM schema initialization",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/bootstrap.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
