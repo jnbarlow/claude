@@ -1,6 +1,6 @@
 # Long-Term Memory Plugin for Claude Code
 
-Persistent recall and storage of facts, decisions, preferences, opinions, and observations across sessions using PostgreSQL. Memories are scored by relevance (tag-based or full-text search), superseded when outdated rather than decayed with time, and verified through active use — not scheduled audits. Designed to work like human memory: notice things, form judgments, revise them as new information arrives.
+Human-like memory for Claude Code. Notices patterns, forms opinions about you and your work, revises them over time — not just a fact ledger but growing understanding across sessions. Backed by PostgreSQL with tag-based recall, full-text search, supersession chains to track how knowledge evolves, and automatic session preload so Claude knows who you are from the first turn.
 
 ## What It Does
 
