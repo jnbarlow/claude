@@ -5,9 +5,10 @@
 #
 # Responsibilities:
 #   1. Check if LTM_DB is configured → relay setup guidance to model context via stdout
-#   2. Install npm dependencies (once) into ${CLAUDE_PLUGIN_DATA}
-#   3. Compile TypeScript MCP server
-#   4. Session preload: inject identity/preference memories into model context
+#   2. Session preload: inject identity/preference memories into model context
+#
+# Note: npm install + TypeScript compile are handled by start-mcp.sh at MCP launch.
+# Database schema migration is handled by the MCP server's bootstrap() in index.ts.
 
 set -euo pipefail
 
@@ -22,38 +23,7 @@ if [ -z "$CONN" ]; then
   exit 0
 fi
 
-# --- Step 2: Install npm dependencies ------------------------------------------
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-/tmp}"
-MCP_SRC_DIR="${CLAUDE_PLUGIN_ROOT}/mcp-server"
-BUILD_DIR="$PLUGIN_DATA/mcp-server/dist"
-
-if [ ! -f "$PLUGIN_DATA/package-lock.json" ]; then
-    cp "${MCP_SRC_DIR}/package.json" "$PLUGIN_DATA/" 2>/dev/null || true
-    cd "$PLUGIN_DATA" && npm install >/dev/null 2>&1 || {
-      echo "🧠 LTM: WARNING — npm install failed. MCP tools may not work."
-      exit 0
-    }
-fi
-
-# --- Step 3: Compile TypeScript -------------------------------------------------
-if [ ! -d "$BUILD_DIR" ]; then
-    cd "$PLUGIN_DATA" && npx tsc \
-        --project "${MCP_SRC_DIR}/tsconfig.json" \
-        --outDir "$BUILD_DIR" >/dev/null 2>&1 || {
-      echo "🧠 LTM: WARNING — TypeScript compilation failed. MCP tools may not work."
-      exit 0
-    }
-fi
-
-# --- Step 4: Apply schema (idempotent DDL — safe on every run) -------------------
-SCHEMA_FILE="${CLAUDE_PLUGIN_ROOT}/sql/schema.sql"
-if [ -f "$SCHEMA_FILE" ]; then
-    psql "$CONN" -f "$SCHEMA_FILE" >/dev/null 2>&1 || true
-else
-    echo "🧠 LTM: WARNING — schema.sql not found at $SCHEMA_FILE (stored functions may be missing)"
-fi
-
-# --- Step 5: Session preload (identity, preferences, habits) --------------------
+# --- Step 2: Session preload (identity, preferences, habits) --------------------
 PRELOAD=$(psql "$CONN" -t -A --no-align \
   -c "SELECT slug || '|' || title || '|' || body FROM fn_session_preload(5);" 2>/dev/null) || true
 

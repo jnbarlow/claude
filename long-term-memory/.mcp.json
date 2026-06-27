@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "ltm-postgres": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_DATA}/mcp-server/dist/index.js"],
+      "command": "/bin/bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.sh"],
       "env": {
         "CLAUDE_PLUGIN_OPTION_LTM_DB": "${user_config.LTM_DB}"
       }
