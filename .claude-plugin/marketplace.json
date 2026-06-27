@@ -11,7 +11,7 @@
         "./skills/ltm-retrieve",
         "./skills/ltm-store"
       ],
-      "hooks": "./hooks/hooks.json",
+      "mcpServers": "./.mcp.json",
       "source": {
         "source": "git-subdir",
         "url": "jnbarlow/claude",
