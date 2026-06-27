@@ -14,5 +14,11 @@
       "description": "Connection URL for the LTM database (e.g., postgresql://user@host/dbname)",
       "type": "string"
     }
-  }
+  },
+  "skills": [
+    "./skills/ltm-retrieve",
+    "./skills/ltm-store"
+  ],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
 }

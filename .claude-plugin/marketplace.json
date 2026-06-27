@@ -7,6 +7,11 @@
     {
       "name": "long-term-memory",
       "description": "Human-like memory for Claude Code. Notices patterns, forms opinions about you and your work, revises them over time — not just a fact ledger but growing understanding across sessions. Backed by PostgreSQL with tag-based recall, full-text search, supersession chains to track how knowledge evolves, and automatic session preload so Claude knows who you are from the first turn.",
+      "skills": [
+        "./skills/ltm-retrieve",
+        "./skills/ltm-store"
+      ],
+      "hooks": "./hooks/hooks.json",
       "source": {
         "source": "git-subdir",
         "url": "jnbarlow/claude",
