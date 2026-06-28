@@ -10,6 +10,9 @@ MCP_SRC_DIR="${CLAUDE_PLUGIN_ROOT}/mcp-server"
 MCP_DST_DIR="$PLUGIN_DATA/mcp-server"
 BUILD_DIR="$MCP_DST_DIR/dist"
 
+# Ensure destination directory exists before copying files.
+mkdir -p "$MCP_DST_DIR"
+
 # --- Step 1: Install npm dependencies (once) ------------------------------------
 if [ ! -f "$MCP_DST_DIR/package-lock.json" ]; then
     echo "[ltm-mcp] Installing Node.js dependencies..." >&2
