@@ -20,7 +20,7 @@ This is how setup guidance reaches users — without this relay they'd never kno
 
 ## 🔄 Session Preload (Automatic)
 
-At session start, bootstrap.sh calls `fn_session_preload(5)` and injects results into model context via stdout. This pre-loads up to 5 current memories weighted by category priority:
+At session start, bootstrap.sh calls `fn_session_preload(10)` and injects results into model context via stdout. This pre-loads up to 10 current memories weighted by category priority:
 
 | Category | Priority Weight | Loaded First? |
 |---|---|---|
@@ -28,7 +28,7 @@ At session start, bootstrap.sh calls `fn_session_preload(5)` and injects results
 | `workflow-preferences` | 80 | Early — how user works |
 | `coding-style` | 75 | Early — conventions & taste |
 | `user-preferences` | 70 | Mid — general preferences |
-| Any other category | 10 (default) | Only if < 5 higher-priority facts exist |
+| Any other category | 10 (default) | Only if < 10 higher-priority facts exist |
 
 A recency bonus (+20) is also applied to memories verified within the last 90 days. The preload output appears in hook context as `🧠 LTM: Session preload — ...`. Surface it on first turn per the rules above.
 
@@ -108,9 +108,9 @@ NOT part of daily recall. Use only when the user explicitly asks "why do you thi
 
 ### Session Preload (Manual Refresh)
 
-Automatically called by bootstrap.sh at session start, but can also be invoked manually after a `/clear` or when context is stale. Reloads top-5 identity/preference memories into conversation.
+Automatically called by bootstrap.sh at session start, but can also be invoked manually after a `/clear` or when context is stale. Reloads top-10 identity/preference memories into conversation.
 
-**Tool:** `ltm_session_preload(limit?: number)` — optional limit parameter (default 5, max 20).
+**Tool:** `ltm_session_preload(limit?: number)` — optional limit parameter (default 10, max 20).
 
 ---
 

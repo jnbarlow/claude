@@ -351,7 +351,7 @@ server.tool(
   async ({ limit }) => {
     if (!CONNECTION_STRING) return { content: [{ type: "text", text: "🧠 LTM not configured." }] };
 
-    const p_limit = Math.min(limit ?? 5, 20); // cap at 20 to avoid context bloat.
+    const p_limit = Math.min(limit ?? 10, 20); // cap at 20 to avoid context bloat.
 
     const result = await withClient(async (client) => {
       return client.query(

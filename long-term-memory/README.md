@@ -4,7 +4,7 @@ Human-like memory for Claude Code. Notices patterns, forms opinions about you an
 
 ## What It Does
 
-- **Session preload**: At session start, up to 5 identity/preference memories are automatically loaded into context (name, role, habits) so Claude knows who you are without being asked
+- **Session preload**: At session start, up to 10 identity/preference memories are automatically loaded into context (name, role, habits) so Claude knows who you are without being asked
 - **Proactive observation & recall**: Notices patterns and forms opinions about the user and their work without being told to. Also queries relevant memories at contextual trigger points (plan entry, corrections, decision points, end-of-conversation reflection). Memories are treated as working hypotheses refined over time via supersession.
 - **Tag-first scoring**: Memories ranked by relevance via configurable signals in `recall_weights` table
 - **Supersession over decay**: Facts are replaced when outdated; superseded facts remain as historical reasoning chains with a score penalty — not excluded entirely
@@ -14,7 +14,7 @@ Human-like memory for Claude Code. Notices patterns, forms opinions about you an
 
 ### Session Preload
 
-At session start, the bootstrap hook fires and calls `fn_session_preload(5)`, which loads up to 5 current memories into model context. Memories are scored by **category priority** (configurable in `recall_weights`), so identity facts load first:
+At session start, the bootstrap hook fires and calls `fn_session_preload(10)`, which loads up to 10 current memories into model context. Memories are scored by **category priority** (configurable in `recall_weights`), so identity facts load first:
 
 | Category | Priority Weight | Purpose |
 |---|---|---|
@@ -24,7 +24,7 @@ At session start, the bootstrap hook fires and calls `fn_session_preload(5)`, wh
 | `coding-style` | 75 | Coding conventions and taste |
 | `user-preferences` | 70 | General personal preferences |
 | `project-insights` | 60 | Judgments about projects, architecture, patterns noticed |
-| Any other category | 10 (default) | Fills remaining slots if < 5 high-priority facts exist |
+| Any other category | 10 (default) | Fills remaining slots if < 10 high-priority facts exist |
 
 Memories verified within the last 90 days get a +20 recency bonus. This preload output is injected into Claude's context automatically — no action needed from you or Claude.
 
@@ -43,29 +43,40 @@ The plugin bundles a lightweight MCP (Model Context Protocol) server that commun
 
 ### Step 1: Provision the Database
 
-Create an empty database for LTM data. The schema will be applied automatically when the MCP server starts — no manual DDL needed.
+Create an empty database and a dedicated user for LTM data. The schema will be applied automatically when the MCP server starts — no manual DDL needed.
 
 ```bash
-# Local PostgreSQL (Linux/macOS)
-createdb long_term_memory
+# Via psql (as superuser or database admin):
+psql -c "CREATE DATABASE <database_name>;"
+psql -c "GRANT ALL PRIVILEGES ON DATABASE <database_name> TO <username>;"
 
-# Or via psql:
-psql -c "CREATE DATABASE long_term_memory;"
-
-# Docker option:
-docker run --name ltm-db -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres
+# Or using createdb:
+createdb <database_name>
 ```
 
-**Database User Permissions:** The connection string user needs `CREATE` privilege on the database's public schema for first-run DDL application. After tables and functions exist, day-to-day recall/storage only requires `SELECT`, `INSERT`, and `UPDATE`. If your DB was provisioned with a read-only role (e.g., managed cloud databases), grant write access:
+**Database User Permissions:** Connect to the database as a superuser and grant schema-level permissions for first-run DDL application. After tables and functions exist, day-to-day recall/storage only requires `SELECT`, `INSERT`, and `UPDATE`. If your DB was provisioned with a read-only role (e.g., managed cloud databases), you'll need these grants:
 
 ```sql
--- Run once as superuser or database owner:
-GRANT CREATE ON SCHEMA public TO claude_ltm;  -- for first-run schema creation
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO claude_ltm;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO claude_ltm;
+-- Connect to the database as superuser:
+psql -d <database_name>
+
+-- Run once inside that database:
+GRANT CREATE ON SCHEMA public TO <username>;
+GRANT USAGE ON SCHEMA public TO <username>;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO <username>;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO <username>;
 
 -- For managed databases where you can't grant CREATE, apply DDL manually:
-psql -f sql/schema.sql  -- run once as superuser, then use read-only role for day-to-day
+\q  -- exit psql, then run as superuser from shell:
+psql -d <database_name> -f sql/schema.sql  -- run once; use read-only role for day-to-day
+```
+
+**Docker option:**
+```bash
+docker run --name ltm-db -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres
+# Then create the database and user inside the container:
+docker exec -it ltm-db psql -U postgres -c "CREATE DATABASE <database_name>;"
+docker exec -it ltm-db psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE <database_name> TO <username>;"
 ```
 
 ### Step 2: Add the Marketplace and Install
@@ -127,7 +138,7 @@ Claude will proactively query memory at contextual trigger points during normal 
 
 | Trigger | What Happens |
 |---------|-------------|
-| **Session start** | Preloads top 5 identity/preference memories into context automatically |
+| **Session start** | Preloads top 10 identity/preference memories into context automatically |
 | **Plan mode entry** | Checks for relevant prior decisions before building a plan |
 | **User correction received** | Recalls existing memories about the topic, then supersedes if needed |
 | **Decision point reached** | Looks up what was decided previously on similar topics |
