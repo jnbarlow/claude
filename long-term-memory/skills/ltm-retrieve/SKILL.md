@@ -35,6 +35,33 @@ A recency bonus (+20) is also applied to memories verified within the last 90 da
 ## Routing Rule (Decision 3.5)
 When `LTM_DB` is configured, all "remember" commands default to PostgreSQL LTM via the ltm-store skill. To explicitly use native Claude Code file-based memory instead, invoke `/memory [text]`. The presence of `$LTM_DB` config is the signal — no special phrases needed. When absent, fall back to native Claude Code memory behavior unchanged.
 
+## Lookup Strategy (Decision 4.0)
+
+Always follow this lookup order — tag-first, FTS auto-fallback:
+
+```
+User needs something remembered?
+│
+├─ Step 1: ltm_recall_by_topic("keyword")
+│   │
+│   ├─ Results found → use them
+│   └─ Empty result?
+│       │
+│       └─ Step 2 (auto): ltm_recall_by_text("short query") — keep it to 2-3 words!
+│               │
+│               ├─ Results found → use them
+│               │
+│               └─ Still empty? Try another short FTS term (split the topic)
+│                   │
+│                   └─ Still nothing? Report "no matching memories" to user
+```
+
+**Why tag-first?** Tag-based recall is faster (indexed join on small dimension tables) and more targeted. FTS scans the full fact table — use it as a deeper net, not the first pass.
+
+**Auto-fallback:** Don't wait for the user to say "look harder." If tags come up empty, try FTS immediately. Many memories are relevant but simply untagged with what you're searching. Only skip the auto-FTS fallback when doing a trivial mid-sentence check where an extra tool call isn't worth it.
+
+**Explicit override:** The user can always ask to "look harder" or "find more on X" even after step 1 returns results — that bypasses the tree and goes straight to FTS with broader terms. Think of the auto-fallback as catching misses, not capping depth.
+
 ## When to Recall
 
 Query memory proactively at these trigger points. Use judgment — do NOT dump all memories on session start. Recall is reactive and context-triggered like human memory.
@@ -82,9 +109,11 @@ Uses dimension table lookups via tags. This is your first choice when you know r
 **Tool:** `ltm_recall_by_topic(tag_pattern: string)`
 
 **Examples:**
-- `tag_pattern = "authentication"` — exact tag match.
+- `tag_pattern = "authentication"` — auto-wrapped to `%authentication%` for substring matching (wildcards are added automatically when absent).
 - `tag_pattern = "%architecture%"` — wildcard pattern for partial matches.
 - `tag_pattern = "%coding-style%"` — find all coding style memories.
+
+**Note:** Wildcard wrapping is automatic. Passing `"memory"` searches for tags containing "memory" (e.g., it will match the tag `memory-system`). You only need explicit `%` wildcards when you want precise control over the pattern.
 
 Tag hierarchy is supported: querying a parent tag recursively returns child-tagged facts too (e.g., searching `security` also finds things tagged `auth`, `jwt-patterns`).
 
@@ -94,9 +123,15 @@ Uses GIN index on title + body columns via PostgreSQL full-text search. Use this
 
 **Tool:** `ltm_recall_by_text(query: string)`
 
+⚠️ **KEEP FTS QUERIES SHORT (2–3 words max).** PostgreSQL's `plainto_tsquery` joins every word with AND — if no single row contains all your terms, you get zero results. A query like `"John Barlow user preferences personal information workflow"` will almost always return nothing because one memory doesn't contain every word.
+
+**Do:** Split into multiple short queries rather than one long one.
+- ✅ `ltm_recall_by_text("user preference")` then `ltm_recall_by_text("workflow habit")` — two focused calls, both hit something.
+- ❌ `ltm_recall_by_text("how we handle authentication errors and database migration strategy for user table")` — too many AND'd terms; returns nothing.
+
 **Examples:**
-- `"how we handle authentication errors"` — natural language query.
-- `"database migration strategy for user table"` — multi-concept search.
+- `"user preference"` — short, likely to match rows containing either word pair.
+- `"database migration"` — focused concept search.
 
 ### Succession Chain History (On-Demand Only)
 

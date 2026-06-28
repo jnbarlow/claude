@@ -328,12 +328,19 @@ DECLARE
     w_ctx_match     SMALLINT := 50;
     w_recency       SMALLINT := 20;
     w_succ_penalty  SMALLINT := -10;
+    v_pattern       TEXT;
 BEGIN
     -- Load weights from config table (defaults above used if row missing).
     SELECT weight_value INTO w_tag_hit      FROM recall_weights WHERE signal_name = 'tag_hit';
     SELECT weight_value INTO w_ctx_match    FROM recall_weights WHERE signal_name = 'context_match';
     SELECT weight_value INTO w_recency      FROM recall_weights WHERE signal_name = 'recency_bonus';
     SELECT weight_value INTO w_succ_penalty FROM recall_weights WHERE signal_name = 'succession_penalty';
+
+    -- Auto-wrap with wildcards if pattern contains no % or _ (substring match is almost always what's wanted).
+    v_pattern := p_tag_pattern;
+    IF POSITION('%' IN v_pattern) = 0 AND POSITION('_' IN v_pattern) = 0 THEN
+        v_pattern := '%' || v_pattern || '%';
+    END IF;
 
     -- Resolve current context if provided.
     IF p_current_ctx IS NOT NULL THEN
@@ -343,7 +350,7 @@ BEGIN
     RETURN QUERY
     WITH RECURSIVE matched_tags AS (
         -- Seed: tags whose names match the pattern directly.
-        SELECT tag_key, parent_key FROM dim_tag WHERE tag_name ILIKE p_tag_pattern
+        SELECT tag_key, parent_key FROM dim_tag WHERE tag_name ILIKE v_pattern
 
         UNION ALL
 
