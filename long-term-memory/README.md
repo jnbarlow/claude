@@ -1,5 +1,7 @@
 # Long-Term Memory Plugin for Claude Code
 
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../LICENSE) Licensed under [AGPL v3](../LICENSE). For commercial use, contact <jnbarlow@gmail.com>.
+
 Human-like memory for Claude Code. Notices patterns, forms opinions about you and your work, revises them over time — not just a fact ledger but growing understanding across sessions. Backed by PostgreSQL with tag-based recall, full-text search, supersession chains to track how knowledge evolves, and automatic session preload so Claude knows who you are from the first turn.
 
 ## What It Does
@@ -231,4 +233,4 @@ The plugin uses these core tables behind the scenes:
 
 ## License
 
-MIT
+Licensed under [AGPL-3.0](../LICENSE). For commercial use, contact <jnbarlow@gmail.com>.

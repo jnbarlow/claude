@@ -1,5 +1,7 @@
 # Claude Code Plugins — jnbarlow's Personal Marketplace
 
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE) Licensed under [AGPL v3](./LICENSE). For commercial use, contact <jnbarlow@gmail.com>.
+
 A self-hosted plugin marketplace for [Claude Code](https://claude.ai/code). Add this repo as a marketplace, then install whichever plugins you want. No central registry required.
 
 ## How to Install

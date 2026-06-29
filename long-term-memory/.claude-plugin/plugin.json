@@ -6,7 +6,7 @@
   "author": {
     "name": "jnbarlow"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",,
   "defaultEnabled": true,
   "userConfig": {
     "LTM_DB": {
