@@ -1,4 +1,4 @@
-# Claude Code Plugins — jnbarlow's Personal Marketplace
+# Claude Code Plugins — John's Personal Marketplace
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE) Licensed under [AGPL v3](./LICENSE). For commercial use, contact <jnbarlow@gmail.com>.
 
