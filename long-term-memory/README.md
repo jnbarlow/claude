@@ -101,11 +101,58 @@ The plugin is enabled by default. If you ever need to toggle it:
 /plugin enable long-term-memory   # or disable
 ```
 
-### Step 3: Configure the Connection String
+### Step 3: Configure Your Secret Provider
 
-When you first enable the plugin, Claude Code will prompt for your PostgreSQL connection string via a settings dialog (stored securely as `LTM_DB` user config). You can also set it anytime with `/plugin → long-term-memory`.
+The plugin retrieves your PostgreSQL connection string at runtime from a secrets provider — credentials are never stored as plaintext in config files. Choose one provider and store your connection string under the fixed secret name **`LTM-DB`**.
 
-That's it — no environment variables or shell configuration needed. The MCP server reads the value automatically on startup.
+**Choose your provider:** `/plugin → long-term-memory → Secret Provider`. Set to `aws`, `1password`, or leave empty for `keychain` (default).
+
+#### Keychain (Default)
+
+**macOS:**
+```bash
+security add-generic-password -s "ltm-mcp" -a "LTM-DB" -w "postgresql://user@host/dbname"
+```
+
+**Linux** (requires libsecret — install with `sudo apt-get install libsecret-1-dev`):
+```bash
+echo "postgresql://user@host/dbname" | secret-tool store --label="LTM DB" service ltm-mcp account LTM-DB
+```
+
+**Windows:** The MCP server uses your OS keychain natively — macOS Keychain, Windows Credential Vault, or Linux Secret Service. On native Windows without WSL/Git Bash, the bootstrap script cannot access the credential store directly; use `LTM_DB_URL` environment variable instead:
+```powershell
+# PowerShell (session-only):
+$env:LTM_DB_URL = "postgresql://user@host/dbname"
+
+# Or set permanently via System Properties → Environment Variables (User)
+```
+On **WSL2** or **Git Bash for Windows**, the Linux commands above work if you install `libsecret`. On pure native Windows, the env var approach is simplest — it falls back automatically when no provider resolves a secret.
+
+Uses your OS keychain natively via [keytar](https://www.npmjs.com/package/keytar) (prebuilt binaries for darwin-x64/x86_64, linux-x64/musl-x64, and win32-x64). On headless Linux without libsecret, use `LTM_DB_URL` env var instead.
+
+#### AWS Secrets Manager
+
+```bash
+aws secretsmanager create-secret --name "LTM-DB" \
+  --secret-string "postgresql://user@host/dbname"
+```
+Uses the standard AWS credential chain (`~/.aws/credentials`, IAM role, etc.). Requires `@aws-sdk/client-secrets-manager` (installed automatically).
+
+#### 1Password Connect Server
+
+```bash
+# Create an item titled LTM-DB with a field labeled "connection_string":
+op item create --title "LTM-DB" --field label=connection_string,value="postgresql://user@host/dbname"
+```
+Requires [1Password Connect Server](https://developer.1password.com/docs/automation/connect/) running locally (`OP_CONNECT_HOST`, `OP_CONNECT_TOKEN` env vars).
+
+#### Local Development (Env Var Fallback)
+
+For quick local use without a secrets provider:
+```bash
+export LTM_DB_URL="postgresql://user@host/dbname"
+```
+This is the final fallback if the configured provider fails to resolve a secret.
 
 ## First Run
 
@@ -225,11 +272,29 @@ The plugin uses these core tables behind the scenes:
 
 | Problem | Solution |
 |---------|----------|
-| Connection refused on first run | Verify the connection string in plugin settings (`/plugin → long-term-memory`) is correct and database server is running. Check bootstrap_errors.log for details |
+| "Could not resolve connection string from keychain" on startup | Verify your credentials are stored in the configured provider under service `ltm-mcp`, account `LTM-DB`. Or export LTM_DB_URL for local development. Check logs with `cat ~/.claude/plugins/data/long-term-memory/bootstrap_errors.log` |
+| "DEPRECATED: It looks like you put a PostgreSQL connection string..." on startup | You have an old plaintext value in the provider field. Follow the [migration guide](#migrating-from-plaintext-config) below to move your credentials to a secrets provider |
+| Keytar install fails on Linux | Install build dependencies: `sudo apt-get install libsecret-1-dev` (Debian/Ubuntu). If you use AWS or 1Password as your provider, this can be ignored — keychain is the default but easily overridden via plugin settings |
+| Keytar build fails on native Windows (no prebuilt binary, or node-gyp errors) | keytar requires Node.js native bindings. On pure Windows without WSL/Git Bash, use `LTM_DB_URL` environment variable instead of the keychain provider — it's the final fallback and works reliably for local development |
+| Connection refused on first run | Verify your credentials are correctly stored in the configured provider and database server is running. Check bootstrap_errors.log for details |
 | MCP tools not available | Run `/plugin` to verify the plugin is enabled and the MCP server started successfully. Re-enable with `claude plugin enable long-term-memory` if needed |
 | Schema version mismatch after plugin update | The MCP server checks schema state on each startup and applies DDL automatically. If stuck, apply manually: `psql -f sql/schema.sql your_database_url` (DDL is idempotent) |
-| Memories not being recalled during conversation | Ensure stored functions exist in the database. Check that LTM_DB config is set via `/plugin`. Recall silently skips if DB unavailable — check logs for errors |
+| Memories not being recalled during conversation | Ensure stored functions exist in the database. Check that LTM_PROVIDER config is set via `/plugin`. Recall silently skips if DB unavailable — check logs for errors |
 | Want to see what's actually in memory | Query directly: `psql -c "SELECT slug, title FROM vw_current_memories;" your_database_url` |
+
+## Migrating from Plaintext Config
+
+If you previously stored a plaintext connection string via the plugin settings (`LTM_DB`), follow these steps:
+
+1. **Retrieve your existing connection string** — it's in `~/.claude/plugins/settings/long-term-memory.json` (or wherever Claude Code stores plugin config).
+2. **Store it in your chosen provider:**
+   - Keychain: `security add-generic-password -s "ltm-mcp" -a "LTM-DB" -w "<your_connection_string>"`
+   - AWS: `aws secretsmanager create-secret --name "LTM-DB" --secret-string "<your_connection_string>"`
+   - 1Password: Create an item titled `LTM-DB` with a field labeled `connection_string`.
+3. **Set the provider** in plugin settings (`/plugin → long-term-memory`) to `aws`, `1password`, or leave empty for `keychain`.
+4. **Verify:** Restart Claude Code and check that you see "Connected to PostgreSQL" instead of any deprecation message.
+
+On first run after migration, if an old-style value is still detected (starts with `postgresql://...` in the provider field), you'll see a helpful migration message in the logs.
 
 ## License
 

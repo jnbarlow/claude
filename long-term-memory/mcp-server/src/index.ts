@@ -4,14 +4,31 @@ import { Pool, PoolClient } from "pg";
 import * as fs from "fs";
 import * as path from "path";
 import z from "zod";
+import { resolveConnectionString } from "./secret.js";
 
 // ─── Configuration ──────────────────────────────────────────────
 
-const CONNECTION_STRING = process.env.CLAUDE_PLUGIN_OPTION_LTM_DB;
-if (!CONNECTION_STRING) {
+let CONNECTION_STRING: string | null = null;
+const PROVIDER = process.env.LTM_PROVIDER || "keychain";
+
+// Detect old-style plaintext config (user pasted connection string into provider field).
+if (PROVIDER.startsWith("postgresql://") || PROVIDER.startsWith("postgres://")) {
   console.error(
-    "[ltm-mcp] Missing CLAUDE_PLUGIN_OPTION_LTM_DB — plugin not configured"
+    "[ltm-mcp] DEPRECATED: It looks like you put a PostgreSQL connection string in the LTM_PROVIDER setting." +
+      "\n   The plugin no longer stores credentials as plaintext. Please:" +
+      "\n   1. Store your connection string in your chosen provider under 'LTM-DB' (see README for commands)" +
+      "\n   2. Set LTM_PROVIDER to: aws, 1password, or keychain" +
+      "\n   Or export LTM_DB_URL as an environment variable for local development."
   );
+}
+
+async function initConnection(): Promise<boolean> {
+  CONNECTION_STRING = await resolveConnectionString(PROVIDER);
+  if (!CONNECTION_STRING) {
+    console.error("[ltm-mcp] Missing connection string — could not resolve from provider.");
+    return false;
+  }
+  return true;
 }
 
 // Path to the SQL schema file (resolved from CLAUDE_PLUGIN_ROOT at runtime).
@@ -43,14 +60,11 @@ if (SCHEMA_SQL) {
 let pool: Pool | null = null;
 
 async function getPool(): Promise<Pool> {
-  const connStr = process.env.CLAUDE_PLUGIN_OPTION_LTM_DB || CONNECTION_STRING;
+  if (!CONNECTION_STRING) {
+    throw new Error("Connection string not initialized — initConnection() was not called.");
+  }
   if (!pool) {
-    pool = new Pool({ connectionString: connStr });
-  } else if (connStr !== CONNECTION_STRING) {
-    // Rebuild only if the env var actually changed at runtime.
-    await pool.end();
-    pool = null;
-    pool = new Pool({ connectionString: connStr });
+    pool = new Pool({ connectionString: CONNECTION_STRING });
   }
   return pool;
 }
@@ -383,7 +397,14 @@ server.tool(
 // ─── Start server on stdio transport (no network port) ──────────────
 
 async function main() {
-  // Bootstrap connectivity test.
+  // Resolve connection string from configured provider.
+  const initialized = await initConnection();
+
+  if (!initialized) {
+    console.error("[ltm-mcp] Could not resolve connection string — LTM tools will be unavailable.");
+  }
+
+  // Bootstrap connectivity test + schema migration.
   const bs = await bootstrap();
   if (!bs.connected && !CONNECTION_STRING) {
     console.error(bs.message || "🧠 LTM: not configured.");

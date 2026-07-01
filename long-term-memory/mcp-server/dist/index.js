@@ -4,10 +4,25 @@ import { Pool } from "pg";
 import * as fs from "fs";
 import * as path from "path";
 import z from "zod";
+import { resolveConnectionString } from "./secret.js";
 // ─── Configuration ──────────────────────────────────────────────
-const CONNECTION_STRING = process.env.CLAUDE_PLUGIN_OPTION_LTM_DB;
-if (!CONNECTION_STRING) {
-    console.error("[ltm-mcp] Missing CLAUDE_PLUGIN_OPTION_LTM_DB — plugin not configured");
+let CONNECTION_STRING = null;
+const PROVIDER = process.env.LTM_PROVIDER || "keychain";
+// Detect old-style plaintext config (user pasted connection string into provider field).
+if (PROVIDER.startsWith("postgresql://") || PROVIDER.startsWith("postgres://")) {
+    console.error("[ltm-mcp] DEPRECATED: It looks like you put a PostgreSQL connection string in the LTM_PROVIDER setting." +
+        "\n   The plugin no longer stores credentials as plaintext. Please:" +
+        "\n   1. Store your connection string in your chosen provider under 'LTM-DB' (see README for commands)" +
+        "\n   2. Set LTM_PROVIDER to: aws, 1password, or keychain" +
+        "\n   Or export LTM_DB_URL as an environment variable for local development.");
+}
+async function initConnection() {
+    CONNECTION_STRING = await resolveConnectionString(PROVIDER);
+    if (!CONNECTION_STRING) {
+        console.error("[ltm-mcp] Missing connection string — could not resolve from provider.");
+        return false;
+    }
+    return true;
 }
 // Path to the SQL schema file (resolved from CLAUDE_PLUGIN_ROOT at runtime).
 const SCHEMA_SQL = (() => {
@@ -36,15 +51,11 @@ if (SCHEMA_SQL) {
 // ─── Connection pool (lazy-init on first tool call or bootstrap) ──
 let pool = null;
 async function getPool() {
-    const connStr = process.env.CLAUDE_PLUGIN_OPTION_LTM_DB || CONNECTION_STRING;
-    if (!pool) {
-        pool = new Pool({ connectionString: connStr });
+    if (!CONNECTION_STRING) {
+        throw new Error("Connection string not initialized — initConnection() was not called.");
     }
-    else if (connStr !== CONNECTION_STRING) {
-        // Rebuild only if the env var actually changed at runtime.
-        await pool.end();
-        pool = null;
-        pool = new Pool({ connectionString: connStr });
+    if (!pool) {
+        pool = new Pool({ connectionString: CONNECTION_STRING });
     }
     return pool;
 }
@@ -249,9 +260,38 @@ async ({ slug_prefix }) => {
     }
     return { content: [{ type: "text", text: output }] };
 });
+server.tool("ltm_session_preload", { limit: z.number().optional() }, async ({ limit }) => {
+    if (!CONNECTION_STRING)
+        return { content: [{ type: "text", text: "🧠 LTM not configured." }] };
+    const p_limit = Math.min(limit ?? 10, 20); // cap at 20 to avoid context bloat.
+    const result = await withClient(async (client) => {
+        return client.query(`SELECT slug, title, body, category, preload_score FROM fn_session_preload($1)`, [p_limit]);
+    });
+    if (!result.ok || !result.data?.rows.length) {
+        return { content: [{ type: "text", text: "🧠 No memories to preload." }] };
+    }
+    const rows = result.data.rows;
+    let output = `🧠 Session Preload (${rows.length} memory):\n`;
+    for (const r of rows) {
+        output += `\n  • ${r.title}`;
+        if ((typeof r.body === "string" && r.body.length > 150)) {
+            output += `\n    ${r.body.slice(0, 150)}…`;
+        }
+        else {
+            output += `\n    ${r.body || ""}`;
+        }
+        output += ` [${r.category}] (score: ${r.preload_score})`;
+    }
+    return { content: [{ type: "text", text: output }] };
+});
 // ─── Start server on stdio transport (no network port) ──────────────
 async function main() {
-    // Bootstrap connectivity test.
+    // Resolve connection string from configured provider.
+    const initialized = await initConnection();
+    if (!initialized) {
+        console.error("[ltm-mcp] Could not resolve connection string — LTM tools will be unavailable.");
+    }
+    // Bootstrap connectivity test + schema migration.
     const bs = await bootstrap();
     if (!bs.connected && !CONNECTION_STRING) {
         console.error(bs.message || "🧠 LTM: not configured.");

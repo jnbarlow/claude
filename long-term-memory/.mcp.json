@@ -4,7 +4,7 @@
       "command": "/bin/bash",
       "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.sh"],
       "env": {
-        "CLAUDE_PLUGIN_OPTION_LTM_DB": "${user_config.LTM_DB}"
+        "LTM_PROVIDER": "${user_config.LTM_PROVIDER}"
       }
     }
   }
