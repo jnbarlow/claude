@@ -282,6 +282,24 @@ The plugin uses these core tables behind the scenes:
 | Memories not being recalled during conversation | Ensure stored functions exist in the database. Check that LTM_PROVIDER config is set via `/plugin`. Recall silently skips if DB unavailable — check logs for errors |
 | Want to see what's actually in memory | Query directly: `psql -c "SELECT slug, title FROM vw_current_memories;" your_database_url` |
 
+## Known Issues
+
+### Plugin updates may not apply while MCP server is running (Claude Code bug)
+
+**Symptom:** After `claude plugin update long-term-memory@jnbarlow-claude` shows success, the MCP tools still behave as if using the old version — returning errors or stale behavior despite metadata showing the correct version.
+
+**Cause:** Claude Code copies new plugin files to `~/.claude/plugins/data/` while the MCP server process holds open file handles to its own binary on Linux. The copy fails silently, so the running process keeps serving from the old code even after a restart (stale files persist on disk). This affects all stdio-based MCP plugins, not just this one.
+
+**Workaround:** Kill any running MCP processes for the plugin before updating:
+```bash
+ps aux | grep "dist/index.js" | grep long-term-memory  # find PID
+kill <PID>                                              # stop process
+claude plugin update long-term-memory@jnbarlow-claude   # now safe to update
+# Restart Claude Code session — new code loads correctly
+```
+
+**Upstream issue:** [anthropics/claude-code#72678](https://github.com/anthropics/claude-code/issues/72678) — plugin updates fail silently when MCP server holds open file handles. Watch/star that issue for progress on a fix (atomic rename instead of in-place copy, or automatic restart during update).
+
 ## Migrating from Plaintext Config
 
 If you previously stored a plaintext connection string via the plugin settings (`LTM_DB`), follow these steps:
