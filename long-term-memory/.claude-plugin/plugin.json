@@ -1,17 +1,17 @@
 {
   "name": "long-term-memory",
   "displayName": "Long-Term Memory (PostgreSQL)",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Human-like memory for Claude Code. Notices patterns, forms opinions about you and your work, revises them over time — not just a fact ledger but growing understanding across sessions. Backed by PostgreSQL with tag-based recall, full-text search, supersession chains to track how knowledge evolves, and automatic session preload so Claude knows who you are from the first turn.",
   "author": {
     "name": "jnbarlow"
   },
-  "license": "AGPL-3.0-only",,
+  "license": "AGPL-3.0-only",
   "defaultEnabled": true,
   "userConfig": {
-    "LTM_DB": {
-      "title": "PostgreSQL Connection String",
-      "description": "Connection URL for the LTM database (e.g., postgresql://user@host/dbname)",
+    "LTM_PROVIDER": {
+      "title": "Secret Provider",
+      "description": "Where your PostgreSQL connection string is stored at runtime. Options: aws (AWS Secrets Manager), 1password (1Password Connect Server), keychain (OS keychain — default). The secret name LTM-DB is used across all providers.",
       "type": "string"
     }
   },
