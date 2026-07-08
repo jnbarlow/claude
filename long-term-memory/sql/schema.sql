@@ -1,4 +1,4 @@
--- LTM Schema v1.0.0 -- Applied by bootstrap.sh on SessionStart
+-- LTM Schema v2.0.0 -- Applied by bootstrap.sh on SessionStart
 -- ============================================================
 -- PostgreSQL Long-Term Memory Schema (DDL)
 -- Generated from design discussion: 2026-06-21
@@ -34,7 +34,7 @@ COMMENT ON TABLE dim_category IS 'Axis: what kind of memory this is — grows or
 
 CREATE TABLE IF NOT EXISTS dim_context (
     context_key  SMALLINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    context_name VARCHAR(120) NOT NULL,          -- project path or session descriptor
+    context_name VARCHAR(512) NOT NULL,          -- project path or session descriptor
     is_active    BOOLEAN DEFAULT true             -- mark inactive without deleting attached memories
 );
 
@@ -67,8 +67,8 @@ CREATE TABLE IF NOT EXISTS fact_memories (
     category_key  SMALLINT REFERENCES dim_category(category_key),
     context_key   SMALLINT REFERENCES dim_context(context_key),
 
-    slug          VARCHAR(120) NOT NULL,              -- stable human-readable key (partial unique below ensures only one CURRENT per slug)
-    title         VARCHAR(300) NOT NULL,               -- one-line summary
+    slug          VARCHAR(300) NOT NULL,              -- stable human-readable key (partial unique below ensures only one CURRENT per slug)
+    title         VARCHAR(500) NOT NULL,               -- one-line summary
     body          TEXT NOT NULL,                       -- full memory content
 
     is_current    BOOLEAN DEFAULT true,                -- leaf node = current truth; false = superseded
@@ -710,4 +710,4 @@ $$ LANGUAGE plpgsql;
 COMMIT;
 
 -- Record this version as applied (outside transaction for safety)
-INSERT INTO ltm_initialized (schema_version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO ltm_initialized (schema_version) VALUES (2) ON CONFLICT DO NOTHING;
