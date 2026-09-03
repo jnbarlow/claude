@@ -96,6 +96,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Update schema version to mark this migration as applied.
-UPDATE ltm_initialized SET schema_version = 2;
+UPDATE ltm_initialized SET schema_version = 3;
 
 COMMIT;
