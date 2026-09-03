@@ -524,9 +524,11 @@ $$ LANGUAGE plpgsql;
 
 -- Function 6: Full-text deep search using GIN index on title + body
 -- Separate from tag-based recall (fn_recall_by_topic). Triggered by "look harder" natural language cues.
+-- Supports OR mode (default, broader) and AND mode (strict) for keyword matching.
 CREATE OR REPLACE FUNCTION fn_recall_by_text(
     p_query       TEXT,
-    p_current_ctx TEXT DEFAULT NULL
+    p_current_ctx TEXT DEFAULT NULL,
+    p_mode        TEXT DEFAULT 'OR'  -- NEW: 'AND' or 'OR', defaults to 'OR' for broader recall
 ) RETURNS TABLE (
     fact_id         INTEGER,
     slug            TEXT,
@@ -544,6 +546,7 @@ DECLARE
     w_ctx_match     SMALLINT := 50;
     w_recency       SMALLINT := 20;
     w_succ_penalty  SMALLINT := -10;
+    v_tsquery       tsquery;
 BEGIN
     -- Load weights from config table (defaults above used if row missing).
     SELECT weight_value INTO w_tag_hit      FROM recall_weights WHERE signal_name = 'tag_hit';
@@ -554,6 +557,18 @@ BEGIN
     -- Resolve current context if provided.
     IF p_current_ctx IS NOT NULL THEN
         SELECT context_key INTO v_ctx_key FROM dim_context WHERE context_name = p_current_ctx;
+    END IF;
+
+    -- Build tsquery based on mode: OR (default, broader) or AND (strict).
+    IF p_mode = 'AND' THEN
+        v_tsquery := plainto_tsquery('english', p_query);  -- AND between terms (strict matching)
+    ELSE
+        -- OR mode: split query into words and join with | for broader recall.
+        SELECT array_to_string(
+            ARRAY(SELECT unnest(string_to_array(p_query, ' '))
+                  WHERE length(trim(both ' ''"' from value)) > 0),
+            ' | '
+        ) INTO v_tsquery;
     END IF;
 
     RETURN QUERY
@@ -567,7 +582,7 @@ BEGIN
                dctx.context_name::TEXT          AS primary_context,
 
                -- Base score: FTS rank (normalized 0-1 scaled to ~40 points max), plus configurable signals.
-               (ts_rank(to_tsvector('english', fm.title || ' ' || fm.body), plainto_tsquery('english', p_query)) * 40)::INTEGER
+               (ts_rank(to_tsvector('english', fm.title || ' ' || fm.body), v_tsquery) * 40)::INTEGER
              + CASE WHEN NOT fm.is_current THEN w_succ_penalty ELSE 0 END
              + CASE WHEN v_ctx_key IS NOT NULL
                         AND (fm.context_key = v_ctx_key OR EXISTS (
@@ -585,7 +600,7 @@ BEGIN
         FROM fact_memories fm
         JOIN dim_category dc   ON fm.category_key = dc.category_key
         JOIN dim_context dctx  ON fm.context_key   = dctx.context_key
-        WHERE to_tsvector('english', fm.title || ' ' || fm.body) @@ plainto_tsquery('english', p_query)
+        WHERE to_tsvector('english', fm.title || ' ' || fm.body) @@ v_tsquery
     )
     SELECT h.fact_id, h.slug, h.title, h.body, h.is_current, h.category,
            h.relevance_score_final,
@@ -710,4 +725,4 @@ $$ LANGUAGE plpgsql;
 COMMIT;
 
 -- Record this version as applied (outside transaction for safety)
-INSERT INTO ltm_initialized (schema_version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO ltm_initialized (schema_version) VALUES (2) ON CONFLICT DO NOTHING;
