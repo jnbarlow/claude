@@ -72,6 +72,25 @@ if (SCHEMA_SQL) {
 }
 
 
+// Discover migration files: schema_v<N>.sql in the same sql/ directory.
+const MIGRATION_FILES = (() => {
+  if (!SCHEMA_SQL) return [];
+  const dir = path.dirname(SCHEMA_SQL);
+  try {
+    const entries = fs.readdirSync(dir).sort(); // sort ensures v1 < v2 < v3 ...
+    return entries
+      .map(name => {
+        const match = name.match(/^schema_v(\d+)\.sql$/);
+        if (!match) return null;
+        return { version: parseInt(match[1], 10), path: path.join(dir, name) };
+      })
+      .filter((x): x is { version: number; path: string } => !!x);
+  } catch {
+    console.error("[ltm-mcp] Could not read sql/ directory — skipping migration discovery.");
+    return [];
+  }
+})();
+
 // ─── Connection pool (lazy-init on first tool call or bootstrap) ──
 
 let pool: Pool | null = null;
@@ -117,31 +136,52 @@ async function bootstrap(): Promise<{ connected: boolean; message?: string }> {
     // Test connectivity.
     await client.query("SELECT 1");
 
-    // Check if schema has been applied by querying the marker table.
-    let needsInit = true;
+    // Determine current schema version in database.
+    let currentVer = 0;
     try {
       const check = await client.query(
         "SELECT COALESCE(MAX(schema_version), 0) AS ver FROM ltm_initialized"
       );
-      const currentVer = parseInt(check.rows[0]?.ver, 10);
-      if (currentVer > 0) {
-        console.log(`[ltm-mcp] Schema already applied (v${currentVer}).`);
-        needsInit = false;
-      } else {
-        console.log("[ltm-mcp] No schema marker found — will apply DDL.");
-      }
+      currentVer = parseInt(check.rows[0]?.ver, 10);
     } catch {
-      // Table doesn't exist yet — fresh DB.
-      console.log("[ltm-mcp] Marker table missing — fresh database detected.");
+      // Marker table doesn't exist — fresh DB.
     }
 
-    if (needsInit && SCHEMA_CONTENT) {
+    if (currentVer === 0 && SCHEMA_CONTENT) {
+      // Fresh install: apply full schema.sql.
       await client.query(SCHEMA_CONTENT);
       console.log("[ltm-mcp] Schema applied successfully.");
-    } else if (needsInit && !SCHEMA_CONTENT) {
-      console.error(
-        "[ltm-mcp] WARNING: Schema needs applying but schema.sql could not be read."
-      );
+    } else if (currentVer > 0) {
+      // Apply pending migrations in order.
+      const pending = MIGRATION_FILES.filter(m => m.version > currentVer);
+      for (const migration of pending) {
+        try {
+          const sql = fs.readFileSync(migration.path, "utf8");
+          await client.query(sql);
+          console.log(`[ltm-mcp] Applied migration v${migration.version}.`);
+
+          // Update version marker after each successful migration.
+          await client.query(
+            `DELETE FROM ltm_initialized WHERE schema_version < ${migration.version}`
+          );
+          await client.query(
+            `INSERT INTO ltm_initialized (schema_version) VALUES (${migration.version}) ON CONFLICT DO NOTHING`
+          );
+        } catch (err) {
+          console.error(`[ltm-mcp] Failed to apply migration v${migration.version}:`, err);
+          break; // Stop on first failure — manual intervention needed.
+        }
+      }
+
+      if (pending.length === 0) {
+        console.log(`[ltm-mcp] Schema already at v${currentVer} — no pending migrations.`);
+      } else {
+        // Re-read actual applied version from DB in case some migrations failed.
+        const finalCheck = await client.query(
+          "SELECT COALESCE(MAX(schema_version), 0) AS ver FROM ltm_initialized"
+        );
+        currentVer = parseInt(finalCheck.rows[0]?.ver, 10);
+      }
     }
 
     client.release();

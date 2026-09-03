@@ -160,7 +160,7 @@ On session start, the plugin's bootstrap hook fires automatically. It installs d
 
 **Session Preload:** After bootstrap completes, Claude will see a preload message at session start: either "No preload memories found" (fresh database) or a list of your top identity/preference memories. This is normal behavior — it means the system knows who you are from previous sessions.
 
-**Schema Versioning:** The MCP server tracks applied versions via a marker table (`ltm_initialized`). On fresh installs, it applies the complete `sql/schema.sql` in one shot. For existing databases, it checks the current version and skips initialization if already up-to-date — you can check with `SELECT MAX(schema_version) FROM ltm_initialized;`.
+**Schema Versioning:** The MCP server tracks applied versions via a marker table (`ltm_initialized`). On fresh installs, it applies the complete `sql/schema.sql` in one shot. For existing databases, it discovers all `schema_v*.sql` migration files, compares their version against what's applied, and runs any pending migrations sequentially on startup — no manual intervention needed. Check current version with `SELECT MAX(schema_version) FROM ltm_initialized;`.
 
 ### Verify Installation
 

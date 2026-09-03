@@ -72,6 +72,19 @@ Feedback: 🧠 Remembering: JWT-based authentication chosen over sessions → Sa
 
 **Slug conventions:** Use kebab-case, descriptive but concise. Include domain prefix if memories span multiple areas (`auth-strategy-jwt`, `css-framework-tailwind`). The slug is the stable identifier — future supersessions reference it by name.
 
+### Field Length Limits
+
+The underlying database has these limits on string fields. Keep your values within them to avoid storage errors:
+
+| Parameter | Max Length | Notes |
+|-----------|------------|-------|
+| `slug`    | 300 chars  | Kebab-case identifier; supersessions append `_vN`, so keep originals short (~80 chars) |
+| `title`   | 500 chars  | One-line summary — usually fits naturally |
+| `context` | 512 chars  | Project name or path. Use project names not full paths when possible |
+| `category`| 50 chars   | Short descriptive names like `workflow-preferences`, `auth-decisions` |
+
+**Slug best practice:** Aim for slugs under 80 characters to leave room for supersession suffixes (`_v1`, `_v2`...). A slug of "always-use-cowsearch-mcp-never-built-in-webfetch" (57 chars) is fine; a slug already near 300 will overflow after even one supersession.
+
 ### Supersede an Existing Fact (Correction)
 
 Use when a stored memory becomes outdated or incomplete due to new information, user correction, or discovered contradiction. Marks old fact as superseded and creates versioned copy (`_v1`, `_v2`...). Returns `-1` gracefully if slug not found — never crashes mid-conversation.
