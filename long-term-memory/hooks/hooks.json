@@ -1,5 +1,5 @@
 {
-  "description": "SessionStart bootstrap for LTM schema initialization",
+  "description": "Long-Term Memory plugin hooks for proactive memory capture",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,27 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/bootstrap.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/user-prompt-eval.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-eval.sh"
           }
         ]
       }

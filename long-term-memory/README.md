@@ -247,6 +247,89 @@ The plugin exposes 9 tools via the bundled MCP server, each mapping to a Postgre
 
 These tools are called automatically by the LTM skills — you don't need to invoke them directly. They use stdio transport (no network port), so there's no risk of port collisions with other applications.
 
+## Hooks
+
+The plugin includes three hooks that automate memory capture and retrieval:
+
+### SessionStart Hook
+
+Fires at session start and preloads up to 10 identity/preference memories into Claude's context. This is how Claude "knows who you are" from the first turn — no action needed from you.
+
+**Configuration:** `hooks/hooks.json` → `SessionStart` event  
+**Script:** `scripts/bootstrap.sh`  
+**Output:** Injected into model context automatically (no user-visible output on success)
+
+### UserPromptSubmit Hook
+
+Fires before each user prompt is submitted to Claude. Queries LTM for relevant memories based on the user's input and injects them as additional context. This helps Claude recall related information without being explicitly asked.
+
+**Configuration:** `hooks/hooks.json` → `UserPromptSubmit` event  
+**Script:** `scripts/user-prompt-eval.sh`  
+**Timeout:** 30 seconds (configurable)  
+**Output:** Injected into model context as `additionalContext`
+
+### Stop Hook (Auto-Store on Decision Detection)
+
+Fires after each assistant response completes. Evaluates whether the conversation contained a meaningful decision worth storing in LTM. If detected, automatically stores the memory without requiring explicit user action.
+
+**Configuration:** `hooks/hooks.json` → `Stop` event  
+**Script:** `scripts/stop-eval.sh`  
+**Session Limit:** Max 5 auto-stores per session (configurable via `/tmp/ltm_session_store_count`)
+
+#### How It Works
+
+1. **Pattern Detection**: Checks the last assistant message for decision signals across 4 categories:
+   - **Signal 1 — Explicit decision language**: "we should", "let's use", "I decided", "we'll go with", "we need to", "it makes sense to"
+   - **Signal 2 — Resolution/conclusion markers**: "the plan is", "i'm going to", "so the approach is", "in summary, we", "after thinking about it", "bottom line is"
+   - **Signal 3 — Contrast/choice language**: "instead of", "rather than using", "vs. I prefer", "compared to", "as opposed to", "better than"
+   - **Signal 4 — Insight/recognition markers**: "I realized", "turns out", "key insight is", "we should never", "always remember to", "the issue is"
+
+2. **Duplicate Check**: Queries LTM for existing memories on the extracted topic — skips if similar memory exists
+
+3. **Session Limit**: Respects max 5 auto-stores per session (resets when Claude Code restarts)
+
+4. **Auto-Store**: Calls `ltm_store_memory` with category "decision" and auto-generated tags
+
+#### Debug Logging
+
+The Stop hook writes to a debug log file for verification:
+
+```bash
+# Watch in real-time
+tail -f /tmp/ltm_stop_hook_debug.log
+
+# View recent activity
+cat /tmp/ltm_stop_hook_debug.log | tail -20
+```
+
+**Log format:**
+```
+[2026-09-03 14:30:00] Signal 2 (resolution marker) detected
+[2026-09-03 14:30:00] Decision detected: The plan is to use Redis for caching...
+[2026-09-03 14:30:00] Session store count: 1/5
+[2026-09-03 14:30:00] Extracted topic: The plan is to use Redis for caching
+[2026-09-03 14:30:00] No duplicate found — proceeding to store
+[2026-09-03 14:30:00] Storing memory: slug=decision-the-plan-is-to-use-redis-for-caching, topic=The plan is to use Redis for caching
+[2026-09-03 14:30:00] Successfully stored memory (slug=decision-the-plan-is-to-use-redis-for-caching)
+```
+
+**Common log entries:**
+| Entry | Meaning |
+|-------|---------|
+| `Signal N detected` | Which pattern matched (1-4) |
+| `Session limit reached — skipping auto-store` | Hit the 5-per-session cap |
+| `Duplicate detected — skipping auto-store` | Similar memory already exists |
+| `Failed to store memory` | MCP server unavailable or LTM error |
+
+**Reset session counter:**
+```bash
+echo "0" > /tmp/ltm_session_store_count
+```
+
+## Architecture
+
+The plugin bundles a lightweight MCP (Model Context Protocol) server that communicates with PostgreSQL via stdio pipes. All database operations go through stored procedures exposed as MCP tools — no shell commands or `psql` invocations are needed. This eliminates sandbox permission prompts and works reliably on all platforms including WSL2.
+
 ## Schema Overview
 
 The plugin uses these core tables behind the scenes:

@@ -4,7 +4,8 @@
       "command": "/bin/bash",
       "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.sh"],
       "env": {
-        "LTM_PROVIDER": "${user_config.LTM_PROVIDER}"
+        "LTM_PROVIDER": "${user_config.LTM_PROVIDER}",
+        "LTM_HTTP_PORT": "58600"
       }
     }
   }

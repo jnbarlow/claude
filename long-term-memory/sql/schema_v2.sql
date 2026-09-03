@@ -69,4 +69,6 @@ FROM fact_succession fs
 JOIN fact_memories old_mem ON fs.original_fact = old_mem.id
 JOIN fact_memories new_mem ON fs.new_fact      = new_mem.id;
 
+-- Update schema version to mark this migration as applied.
+UPDATE ltm_initialized SET schema_version = 2;
 COMMIT;
