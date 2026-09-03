@@ -1,4 +1,4 @@
--- LTM Schema v2.0.0 -- Applied by bootstrap.sh on SessionStart
+-- LTM Schema v3.0.0 -- Applied by bootstrap.sh on SessionStart
 -- ============================================================
 -- PostgreSQL Long-Term Memory Schema (DDL)
 -- Generated from design discussion: 2026-06-21
@@ -725,4 +725,4 @@ $$ LANGUAGE plpgsql;
 COMMIT;
 
 -- Record this version as applied (outside transaction for safety)
-INSERT INTO ltm_initialized (schema_version) VALUES (2) ON CONFLICT DO NOTHING;
+INSERT INTO ltm_initialized (schema_version) VALUES (3) ON CONFLICT DO NOTHING;
