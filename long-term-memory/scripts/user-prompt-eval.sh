@@ -44,25 +44,35 @@ keywords=$(echo "$prompt" | tr '[:upper:]' '[:lower:]' | grep -oE '\b[a-z]{4,}\b
   fi
 done | sort -u)
 
+# Detect current project context for LTM scoring.
+# Priority: CLAUDE_PROJECT_DIR > PWD > empty (no context boost).
+CURRENT_CONTEXT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
 # Query LTM for each keyword separately and combine results.
 # Use deduplicate=true to filter out already-injected slugs (in-memory tracking in MCP server).
+# Pass current_context for context-aware scoring (+50 boost for matching projects).
+# Pass min_score=40 to filter out low-relevance noise (single tag hit without context match).
 all_results=""
 result_count=0
 
 for kw in $keywords; do
   result=$(curl -s -X POST "http://127.0.0.1:${HTTP_PORT}/api/tool" \
     -H "Content-Type: application/json" \
-    -d "{\"tool\":\"ltm_recall_by_text\",\"params\":{\"query\":\"$kw\",\"deduplicate\":true}}" \
+    -d "{\"tool\":\"ltm_recall_by_text\",\"params\":{\"query\":\"$kw\",\"deduplicate\":true,\"current_context\":\"$CURRENT_CONTEXT\",\"min_score\":40}}" \
     2>/dev/null) || continue
 
   if [ -n "${result:-}" ]; then
     formatted=$(echo "$result" | jq -r '.content[0].text // empty' 2>/dev/null) || true
     # Skip if no results or all were filtered (empty text after deduplication).
     if [ -n "${formatted:-}" ] && ! echo "$formatted" | grep -q "No matching memories"; then
-      all_results="${all_results}${formatted}
+      # Filter out superseded memories before injection.
+      clean_formatted=$(echo "$formatted" | grep -v "\[superseded\]")
+      if [ -n "${clean_formatted:-}" ]; then
+        all_results="${all_results}${clean_formatted}
 ---SEPARATOR---
 "
-      result_count=$((result_count + 1))
+        result_count=$((result_count + 1))
+      fi
     fi
   fi
 done

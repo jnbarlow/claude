@@ -74,7 +74,9 @@ This implementation adds two new hooks to the Long-Term Memory (LTM) plugin that
 
 ### UserPromptSubmit Hook
 - **Intelligent keyword extraction**: Uses PostgreSQL's FTS for stop word removal and stemming
-- **OR mode by default**: Broader recall to catch more relevant memories
+- **OR mode by default**: Broader recall to catch more relevant memories (fixed in v4 — multi-word queries now work correctly)
+- **Context-aware scoring**: Passes project path as `current_context` parameter; matches get +50 score boost
+- **Minimum score filtering**: Drops results below score threshold (default: no filter, but hooks can set min_score=40)
 - **No truncation**: Include full memory content when recalled — partial memories could be misleading
 - **Graceful degradation**: Exits silently if MCP server unavailable
 
@@ -94,7 +96,15 @@ bash -n stop-eval.sh           # ✓ syntax OK
 
 ## Migration Path
 
-The MCP server will automatically apply schema_v2.sql on next startup if the current schema_version is 1. The migration is idempotent and safe to re-run.
+Migrations are applied automatically by the MCP server at bootstrap based on `schema_version` in the database:
+
+| Version | File | Description |
+|---|---|---|
+| v1 → v2 | `sql/schema_v2.sql` | Widen VARCHAR columns (slug, title) for real-world usage |
+| v2 → v3 | `sql/schema_v3.sql` | Add OR mode support to `fn_recall_by_text` with `p_mode` parameter |
+| v3 → v4 | `sql/schema_v4.sql` | Fix broken OR mode tsquery construction (multi-word queries now work) |
+
+All migrations are idempotent and safe to re-run. The server applies them in order and updates the version marker after each successful migration.
 
 ## Files Created/Modified
 

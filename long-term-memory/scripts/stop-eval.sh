@@ -146,16 +146,22 @@ fi
 # Generate slug from topic (lowercase, replace spaces with hyphens).
 slug=$(echo "$topic" | tr 'A-Z' 'a-z' | sed 's/ /-/g')
 
-# Extract tags from decision text (first 3 meaningful words, >4 chars).
+# Strip decision signal prefixes before extracting tags to avoid garbage like "decision-instead-of".
+clean_text=$(echo "$decision_text" | sed -E 's/^(instead of|rather than using|rather than|i decided|we should|let us use|the plan is|so the approach is|i realized|turns out)[[:space:]]+//i')
+
+# Extract tags from cleaned text (first 3 meaningful words, >4 chars).
 # Use jq to build JSON array safely.
-tags_json=$(echo "$decision_text" | tr '[:upper:]' '[:lower:]' | grep -oE '\b[a-z]{4,}\b' | sort -u | head -3 | jq -R . | jq -s '.')
+tags_json=$(echo "$clean_text" | tr '[:upper:]' '[:lower:]' | grep -oE '\b[a-z]{5,}\b' | sort -u | head -3 | jq -R . | jq -s '.')
 
 log_message "Storing memory: slug=decision-${slug}, topic=${topic}"
 
-# Store memory via HTTP — follow same convention as other storage (dynamic tags).
+# Detect current project context for LTM scoring (same logic as user-prompt-eval).
+CURRENT_CONTEXT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
+# Store memory via HTTP — pass actual project path as context for future context-aware recall.
 store_result=$(curl -s -X POST "http://127.0.0.1:${HTTP_PORT}/api/tool" \
   -H "Content-Type: application/json" \
-  -d "{\"tool\":\"ltm_store_memory\",\"params\":{\"slug\":\"decision-${slug}\",\"title\":\"$(echo "$topic" | head -c 50)\",\"body\":\"${summary}\",\"category\":\"decision\",\"context\":\"auto-stored from Stop hook\",\"tags\":${tags_json}}}" \
+  -d "{\"tool\":\"ltm_store_memory\",\"params\":{\"slug\":\"decision-${slug}\",\"title\":\"$(echo "$topic" | head -c 50)\",\"body\":\"${summary}\",\"category\":\"decision\",\"context\":\"${CURRENT_CONTEXT}\",\"tags\":${tags_json}}}" \
   2>/dev/null) || true
 
 if [ -n "${store_result:-}" ] && echo "$store_result" | grep -q "Stored"; then
