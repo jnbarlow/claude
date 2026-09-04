@@ -163,7 +163,7 @@ async function bootstrap() {
     }
 }
 // ─── MCP Server Setup ──────────────────────────────────────────────
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.0" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.1.1" });
 // Tool handler map — used by both MCP and HTTP transports.
 const TOOL_HANDLERS = {};
 function registerHandler(name, handler) {
@@ -208,20 +208,37 @@ const handleStoreMemory = async ({ slug, category, context, title, body, tags })
 };
 server.tool("ltm_store_memory", { slug: z.string(), category: z.string(), context: z.string(), title: z.string(), body: z.string(), tags: z.array(z.string()).optional() }, handleStoreMemory);
 registerHandler("ltm_store_memory", handleStoreMemory);
-const handleRecallByTopic = async ({ tag_pattern }) => {
+const handleRecallByTopic = async ({ tag_pattern, current_context, min_score }) => {
     if (!CONNECTION_STRING)
         return { content: [{ type: "text", text: "🧠 LTM not configured." }] };
-    const result = await withClient(async (client) => {
-        return client.query(`SELECT slug, title, body, is_current FROM fn_recall_by_topic($1)`, [tag_pattern]);
-    });
+    // Build query with optional context parameter for context-aware scoring.
+    let result;
+    if (current_context) {
+        result = await withClient(async (client) => {
+            return client.query(`SELECT slug, title, body, is_current, relevance_score FROM fn_recall_by_topic($1, $2)`, [tag_pattern, current_context]);
+        });
+    }
+    else {
+        result = await withClient(async (client) => {
+            return client.query(`SELECT slug, title, body, is_current, relevance_score FROM fn_recall_by_topic($1)`, [tag_pattern]);
+        });
+    }
     if (!result.ok || !result.data?.rows.length) {
         return { content: [{ type: "text", text: "🧠 No matching memories." }] };
     }
-    const rows = result.data.rows;
+    let rows = result.data.rows;
+    // Filter by minimum score if provided.
+    if (min_score && rows.length > 0) {
+        rows = rows.filter(r => r.relevance_score >= min_score);
+        if (rows.length === 0) {
+            return { content: [{ type: "text", text: `🧠 No matching memories above score threshold (${min_score}).` }] };
+        }
+    }
     let output = `Found ${rows.length} memory(ies):\n`;
     for (const r of rows) {
         const status = r.is_current ? "(current)" : "[superseded]";
-        output += `\n  • [${status}] ${r.title}\n    Slug: ${r.slug}`;
+        output += `\n  • [${status}] ${r.title}`;
+        output += `\n    Slug: ${r.slug} | Score: ${r.relevance_score}`;
         if ((typeof r.body === "string" && r.body.length > 120)) {
             output += `\n    Body: ${r.body.slice(0, 120)}…`;
         }
@@ -231,14 +248,27 @@ const handleRecallByTopic = async ({ tag_pattern }) => {
     }
     return { content: [{ type: "text", text: output }] };
 };
-server.tool("ltm_recall_by_topic", { tag_pattern: z.string() }, handleRecallByTopic);
+server.tool("ltm_recall_by_topic", {
+    tag_pattern: z.string(),
+    current_context: z.string().optional(), // Optional: project path for context-aware scoring (+50 boost)
+    min_score: z.number().optional() // Optional: filter out low-relevance results server-side
+}, handleRecallByTopic);
 registerHandler("ltm_recall_by_topic", handleRecallByTopic);
-const handleRecallByText = async ({ query, deduplicate }) => {
+const handleRecallByText = async ({ query, deduplicate, current_context, min_score }) => {
     if (!CONNECTION_STRING)
         return { content: [{ type: "text", text: "🧠 LTM not configured." }] };
-    const result = await withClient(async (client) => {
-        return client.query(`SELECT slug, title, body, is_current FROM fn_recall_by_text($1)`, [query]);
-    });
+    // Build query with optional context parameter for context-aware scoring.
+    let result;
+    if (current_context) {
+        result = await withClient(async (client) => {
+            return client.query(`SELECT slug, title, body, is_current, relevance_score FROM fn_recall_by_text($1, $2)`, [query, current_context]);
+        });
+    }
+    else {
+        result = await withClient(async (client) => {
+            return client.query(`SELECT slug, title, body, is_current, relevance_score FROM fn_recall_by_text($1)`, [query]);
+        });
+    }
     if (!result.ok || !result.data?.rows.length) {
         return { content: [{ type: "text", text: "🧠 No matching memories." }] };
     }
@@ -251,10 +281,18 @@ const handleRecallByText = async ({ query, deduplicate }) => {
         }
         rows = filteredRows;
     }
+    // Filter by minimum score if provided.
+    if (min_score && rows.length > 0) {
+        rows = rows.filter(r => r.relevance_score >= min_score);
+        if (rows.length === 0) {
+            return { content: [{ type: "text", text: `🧠 No matching memories above score threshold (${min_score}).` }] };
+        }
+    }
     let output = `Found ${rows.length} memory(ies):\n`;
     for (const r of rows) {
         const status = r.is_current ? "(current)" : "[superseded]";
-        output += `\n  • [${status}] ${r.title}\n    Slug: ${r.slug}`;
+        output += `\n  • [${status}] ${r.title}`;
+        output += `\n    Slug: ${r.slug} | Score: ${r.relevance_score}`;
         if ((typeof r.body === "string" && r.body.length > 120)) {
             output += `\n    Body: ${r.body.slice(0, 120)}…`;
         }
@@ -264,7 +302,11 @@ const handleRecallByText = async ({ query, deduplicate }) => {
     }
     return { content: [{ type: "text", text: output }] };
 };
-server.tool("ltm_recall_by_text", { query: z.string() }, handleRecallByText);
+server.tool("ltm_recall_by_text", {
+    query: z.string(),
+    current_context: z.string().optional(), // Optional: project path for context-aware scoring (+50 boost)
+    min_score: z.number().optional() // Optional: filter out low-relevance results server-side
+}, handleRecallByText);
 registerHandler("ltm_recall_by_text", handleRecallByText);
 const handleSupersedeFact = async ({ slug, new_title }) => {
     if (!CONNECTION_STRING)

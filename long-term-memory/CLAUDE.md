@@ -25,3 +25,19 @@ Bump versions together across these locations when releasing:
 - `.claude-plugin/plugin.json` → version field
 - Skills under `skills/*/SKILL.md` → frontmatter version
 - Server identity in `mcp-server/src/index.ts` line ~160 (McpServer constructor)
+
+## Commit Messages
+
+**Issue branches (`issue-\d+`):** Prefix with issue number.
+```
+# Branch: issue-3
+commit: "issue-3: fixed OR mode tsquery and bumped version to 1.1.1"
+```
+
+**Other branches:** Fall back to conventional commits (feat/fix/chore/docs).
+```
+# Branch: main or feature/x
+commit: "fix(ltm): handle missing migration gracefully"
+```
+
+**Never include `Co-Authored-By: Claude` lines** in commit messages.

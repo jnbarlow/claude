@@ -3,7 +3,7 @@ name: ltm-retrieve
 description: |
   Query long-term memory using the bundled MCP server. Recall facts, decisions, preferences relevant to the current task.
 allowed-tools: Read, Glob
-version: "1.1.0"
+version: "1.1.1"
 tags: [memory, postgresql, recall]
 ---
 

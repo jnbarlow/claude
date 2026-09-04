@@ -1,4 +1,4 @@
--- LTM Schema v3.0.0 -- Applied by bootstrap.sh on SessionStart
+-- LTM Schema v4.0.0 -- Applied by bootstrap.sh on SessionStart
 -- ============================================================
 -- PostgreSQL Long-Term Memory Schema (DDL)
 -- Generated from design discussion: 2026-06-21
@@ -563,12 +563,32 @@ BEGIN
     IF p_mode = 'AND' THEN
         v_tsquery := plainto_tsquery('english', p_query);  -- AND between terms (strict matching)
     ELSE
-        -- OR mode: split query into words and join with | for broader recall.
-        SELECT array_to_string(
-            ARRAY(SELECT unnest(string_to_array(p_query, ' '))
-                  WHERE length(trim(both ' ''"' from value)) > 0),
-            ' | '
-        ) INTO v_tsquery;
+        -- OR mode: split query into words, cast each to tsquery, join with | operator.
+        -- Each word is lexeme-processed via ::tsquery; the || operator on tsquery values
+        -- produces a proper tsquery OR expression in PostgreSQL.
+        DECLARE
+            v_word TEXT;
+            v_first BOOLEAN := true;
+        BEGIN
+            v_tsquery := NULL;
+            FOR v_word IN
+                SELECT trim(both ' ''"' from value)
+                FROM unnest(string_to_array(p_query, ' ')) AS value
+                WHERE length(trim(both ' ''"' from value)) > 0
+            LOOP
+                IF v_first THEN
+                    v_tsquery := v_word::tsquery;
+                    v_first := false;
+                ELSE
+                    v_tsquery := v_tsquery || ' | ' || v_word::tsquery;
+                END IF;
+            END LOOP;
+
+            -- If no words survived filtering, default to a query that matches nothing.
+            IF v_tsquery IS NULL THEN
+                v_tsquery := '''nonexistentwordxyz'''::tsquery;
+            END IF;
+        END;
     END IF;
 
     RETURN QUERY
@@ -725,4 +745,4 @@ $$ LANGUAGE plpgsql;
 COMMIT;
 
 -- Record this version as applied (outside transaction for safety)
-INSERT INTO ltm_initialized (schema_version) VALUES (3) ON CONFLICT DO NOTHING;
+INSERT INTO ltm_initialized (schema_version) VALUES (4) ON CONFLICT DO NOTHING;

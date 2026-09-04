@@ -66,7 +66,7 @@ fi
 # --- Step 3: Session preload (identity, preferences, habits) ------------------
 
 PRELOAD=$(psql "$CONN" -t -A --no-align \
-  -c "SELECT slug || '|' || title || '|' || body FROM fn_session_preload(10);" 2>/dev/null) || true
+  -c "SELECT slug || '|' || title || '|' || body FROM fn_session_preload(8);" 2>/dev/null) || true
 
 if [ -n "$PRELOAD" ]; then
   echo "🧠 LTM: Session preload — the following memories are loaded into context:"

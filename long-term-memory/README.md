@@ -30,6 +30,23 @@ At session start, the bootstrap hook fires and calls `fn_session_preload(10)`, w
 
 Memories verified within the last 90 days get a +20 recency bonus. This preload output is injected into Claude's context automatically — no action needed from you or Claude.
 
+### Relevance Scoring
+
+When recalling memories (via `fn_recall_by_text` or `fn_recall_by_topic`), each result gets a composite score from four signals in the `recall_weights` table:
+
+| Signal | Weight | When It Applies |
+|---|---|---|
+| `context_match` | +50 | Memory is from the same project as the current query (project path match) |
+| `tag_hit` | +30 per hit (capped at 3) | Memory tagged with a keyword from the query |
+| `recency_bonus` | +20 | Memory verified within last 90 days and still current |
+| `succession_penalty` | -10 | Memory is superseded by a newer fact (not excluded, just deprioritized) |
+
+Plus full-text search rank (normalized to ~40 points max). Scores are additive — a highly relevant memory from another project can still beat a mediocre match from the current one.
+
+**Minimum score filtering:** The MCP server accepts an optional `min_score` parameter (default: no filter). Set it to 40+ to drop low-relevance noise (single tag hit without context match).
+
+**OR vs AND mode:** Queries default to OR mode (broader recall) — each word in the query is matched independently. Use AND mode for strict matching across all terms.
+
 ### Architecture
 
 The plugin bundles a lightweight MCP (Model Context Protocol) server that communicates with PostgreSQL via stdio pipes. All database operations go through stored procedures exposed as MCP tools — no shell commands or `psql` invocations are needed. This eliminates sandbox permission prompts and works reliably on all platforms including WSL2.
