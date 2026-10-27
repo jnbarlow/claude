@@ -248,7 +248,7 @@ Storage is always declared aloud before writing — "🧠 Remembering: [summary]
 
 ## MCP Tools
 
-The plugin exposes 9 tools via the bundled MCP server, each mapping to a PostgreSQL stored procedure:
+The plugin exposes 11 tools via the bundled MCP server, each mapping to a PostgreSQL stored procedure:
 
 | Tool | Stored Procedure | Purpose |
 |------|-----------------|---------|
@@ -261,8 +261,12 @@ The plugin exposes 9 tools via the bundled MCP server, each mapping to a Postgre
 | `ltm_add_context` | `fn_add_context()` | Attach secondary context |
 | `ltm_get_succession_chain` | `fn_get_succession_chain()` | View history of a decision |
 | `ltm_session_preload` | `fn_session_preload()` | Load top identity/preference memories at session start |
+| `ltm_list_memories` | `fn_list_memories()` | Enumerate all memories (inventory / cleanup) |
+| `ltm_delete_fact` | `fn_delete_fact()` | **Delete a memory — irreversible, cleanup only** |
 
 These tools are called automatically by the LTM skills — you don't need to invoke them directly. They use stdio transport (no network port), so there's no risk of port collisions with other applications.
+
+> ⚠️ `ltm_delete_fact` physically and irreversibly removes a memory row. It is cleanup-only — never called during normal conversation. See the [ltm-store skill](./long-term-memory/skills/ltm-store/SKILL.md) for its hardening rules.
 
 ## Hooks
 
@@ -359,12 +363,14 @@ The plugin uses these core tables behind the scenes:
 | `fact_succession` | Directed graph of how knowledge evolved over time |
 | `verification_events` | Timestamped confirmations tied to active use, not scheduled scans |
 
-**9 stored functions** provide the interface layer — callers never touch tables directly:
+**11 stored functions** provide the interface layer — callers never touch tables directly:
 - `fn_store_memory()` / `fn_supersede_fact()` / `fn_verify_fact()` for writes
 - `fn_recall_by_topic()` / `fn_recall_by_text()` for reads (tag-based and full-text)
 - `fn_get_succession_chain()` for historical introspection ("why do you think that?")
 - `fn_add_tags()` / `fn_add_context()` for post-storage mutations
 - `fn_session_preload()` for automatic identity/preference loading at session start
+- `fn_list_memories()` for inventory/cleanup enumeration (see ltm_list_memories)
+- `fn_delete_fact()` for irreversible hard-delete cleanup (see ltm_delete_fact)
 
 **Category Priority System:** The `recall_weights` table stores configurable weights per category name (prefixed with `category_`). Categories like `user-identity`, `workflow-preferences`, and `coding-style` get higher scores so they load first during preload. Default weight is 10 for any unlisted category.
 

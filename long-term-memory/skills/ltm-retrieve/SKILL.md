@@ -3,7 +3,7 @@ name: ltm-retrieve
 description: |
   Query long-term memory using the bundled MCP server. Recall facts, decisions, preferences relevant to the current task.
 allowed-tools: Read, Glob
-version: "1.1.1"
+version: "1.1.2"
 tags: [memory, postgresql, recall]
 ---
 
@@ -147,6 +147,14 @@ Automatically called by bootstrap.sh at session start, but can also be invoked m
 
 **Tool:** `ltm_session_preload(limit?: number)` — optional limit parameter (default 10, max 20).
 
+### List All Memories (Inventory / Cleanup)
+
+Enumerates stored memories with **full content** and current/superseded status. No required filter — this is how you see what's actually in memory without querying the database directly. Use it for duplicate detection, quality review, or cleanup (see ltm-store skill's Self-Heal section). Body is returned untruncated so duplicates can be judged.
+
+**Tool:** `ltm_list_memories(limit?: number)` — optional limit (default 200, max 500) to cap output size.
+
+> **Duplicate cluster → cleanup trigger:** if recall surfaces the same fact across multiple memories, that's a signal to run ltm-store's Self-Heal pass (merge duplicates via supersession, then propose delete). See [ltm-store skill](../ltm-store/SKILL.md) for the full workflow.
+
 ---
 
 ## Interpreting Results
@@ -177,4 +185,5 @@ Found N memories about [topic]:
 
 1. **MCP tool call fails**: Fall back to native Claude Code file-based memory via `/memory`. Do NOT error loudly — silently skip recall if the MCP server is unavailable and continue the conversation normally.
 2. **Never expose connection strings** in any user-facing output, logs, or error messages.
-3. Tag search (`ltm_recall_by_topic`) is the primary path; FTS (`ltm_recall_by_text`) is an explicit opt-in for "look harder" queries when tags come up empty or user asks to think deeper about a topic.
+3. Delete (`ltm_delete_fact`) is cleanup-only — see ltm-store's warning banner. Hard delete removes the row entirely, so recall never surfaces deleted memories (nothing to filter).
+4. Tag search (`ltm_recall_by_topic`) is the primary path; FTS (`ltm_recall_by_text`) is an explicit opt-in for "look harder" queries when tags come up empty or user asks to think deeper about a topic.
