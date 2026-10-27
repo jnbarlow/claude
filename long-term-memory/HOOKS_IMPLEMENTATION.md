@@ -103,7 +103,8 @@ Migrations are applied automatically by the MCP server at bootstrap based on `sc
 | v1 → v2 | `sql/schema_v2.sql` | Widen VARCHAR columns (slug, title) for real-world usage |
 | v2 → v3 | `sql/schema_v3.sql` | Add OR mode support to `fn_recall_by_text` with `p_mode` parameter |
 | v3 → v4 | `sql/schema_v4.sql` | Fix broken OR mode tsquery construction (multi-word queries now work) |
-| v4 → v5 | `sql/schema_v5.sql` | Add `fn_list_memories` inventory + `fn_delete_fact` hard-delete route |
+| v4 → v5 | `sql/schema_v5.sql` | Add `fn_list_memories` inventory + soft-delete route (`fn_delete_fact`) |
+| v5 → v6 | `sql/schema_v6.sql` | Fix OR-mode recall: single canonical `fn_recall_by_text`, operators as literal lexemes, case-insensitive multi-word matching |
 
 All migrations are idempotent and safe to re-run. The server applies them in order and updates the version marker after each successful migration.
 

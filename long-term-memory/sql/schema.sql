@@ -1,4 +1,4 @@
--- LTM Schema v5.0.0 -- Applied by bootstrap.sh on SessionStart
+-- LTM Schema v6.0.0 -- Applied by bootstrap.sh on SessionStart
 -- ============================================================
 -- PostgreSQL Long-Term Memory Schema (DDL)
 -- Generated from design discussion: 2026-06-21
