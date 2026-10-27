@@ -1,4 +1,4 @@
--- LTM Schema v4.0.0 -- Applied by bootstrap.sh on SessionStart
+-- LTM Schema v5.0.0 -- Applied by bootstrap.sh on SessionStart
 -- ============================================================
 -- PostgreSQL Long-Term Memory Schema (DDL)
 -- Generated from design discussion: 2026-06-21
@@ -73,12 +73,19 @@ CREATE TABLE IF NOT EXISTS fact_memories (
 
     is_current    BOOLEAN DEFAULT true,                -- leaf node = current truth; false = superseded
 
+    -- Soft-delete: reversible cleanup. is_deleted drives active-only filters (orthogonal to is_current /
+    -- supersession); deleted_at records when the flip happened so a future purge job can apply a grace
+    -- window before physically removing rows. Rows stay in the table for audit/recovery until purged.
+    is_deleted    BOOLEAN DEFAULT false,
+    deleted_at    TIMESTAMPTZ NULL,
+
     created_at    TIMESTAMPTZ DEFAULT NOW(),
     updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 COMMENT ON TABLE fact_memories IS 'The central table: every memory/fact/knowledge piece lives here';
 COMMENT ON COLUMN fact_memories.is_current IS 'TRUE = current truth (leaf of succession chain). FALSE = superseded by newer evidence.';
+COMMENT ON COLUMN fact_memories.is_deleted IS 'TRUE = soft-deleted (recoverable until purge); active rows are is_deleted = false. Orthogonal to is_current.';
 
 -- Indexes for fast dimension-based lookups (integer seeks, not scans)
 CREATE INDEX IF NOT EXISTS idx_fm_category   ON fact_memories(category_key);
@@ -230,7 +237,7 @@ LEFT JOIN LATERAL (
     WHERE fcbr.memory_id = fm.id
 ) fc ON true
 
-WHERE fm.is_current = true
+WHERE fm.is_current = true AND fm.is_deleted = false
 GROUP BY fm.id, fm.slug, fm.title, fm.body, dc.category_name, dctx.context_name, dt.tag_names;
 
 
@@ -389,6 +396,7 @@ BEGIN
         JOIN dim_context dctx  ON fm.context_key   = dctx.context_key
         JOIN fact_memory_tags ftag ON fm.id = ftag.memory_id
         JOIN matched_tags mt    ON ftag.tag_key = mt.tag_key
+        WHERE fm.is_deleted = false
     ),
     ranked AS (
         SELECT h.*,
@@ -516,7 +524,7 @@ BEGIN
     FROM fact_memories fm
     LEFT JOIN fact_succession fs ON (fm.id = fs.original_fact AND fs.succession_type IS NOT NULL)
                                 OR (fm.id = fs.new_fact AND fs.succession_type IS NOT NULL)
-    WHERE fm.slug LIKE p_slug_prefix || '%'
+    WHERE fm.slug LIKE p_slug_prefix || '%' AND fm.is_deleted = false
     ORDER BY fm.created_at ASC;
 END;
 $$ LANGUAGE plpgsql;
@@ -563,32 +571,22 @@ BEGIN
     IF p_mode = 'AND' THEN
         v_tsquery := plainto_tsquery('english', p_query);  -- AND between terms (strict matching)
     ELSE
-        -- OR mode: split query into words, cast each to tsquery, join with | operator.
-        -- Each word is lexeme-processed via ::tsquery; the || operator on tsquery values
-        -- produces a proper tsquery OR expression in PostgreSQL.
-        DECLARE
-            v_word TEXT;
-            v_first BOOLEAN := true;
-        BEGIN
-            v_tsquery := NULL;
-            FOR v_word IN
-                SELECT trim(both ' ''"' from value)
-                FROM unnest(string_to_array(p_query, ' ')) AS value
-                WHERE length(trim(both ' ''"' from value)) > 0
-            LOOP
-                IF v_first THEN
-                    v_tsquery := v_word::tsquery;
-                    v_first := false;
-                ELSE
-                    v_tsquery := v_tsquery || ' | ' || v_word::tsquery;
-                END IF;
-            END LOOP;
+        -- OR mode: treat each space-separated word as a literal lexeme. quote_literal() forces bare
+        -- & / | / ( ) etc. to be search text, not tsquery syntax — so "C++ & Rust" matches those words.
+        -- lower() is applied before quoting because a quoted tsquery lexeme ('Rust') is case-sensitive;
+        -- FTS vectors store lowercase lexemes, so we must lowercase first for case-insensitive matching.
+        -- string_agg builds the whole expression and casts ONCE; building incrementally with || ' | ' on
+        -- tsquery values would fail ('syntax error in tsquery: " | "'). NULL when no words survive -> fall
+        -- back to a query that matches nothing.
+        SELECT string_agg(quote_literal(lower(trim(both ' ''"' FROM value))), ' | ')::tsquery
+          INTO v_tsquery
+          FROM unnest(string_to_array(p_query, ' ')) AS value
+          WHERE length(trim(both ' ''"' FROM value)) > 0;
 
-            -- If no words survived filtering, default to a query that matches nothing.
-            IF v_tsquery IS NULL THEN
-                v_tsquery := '''nonexistentwordxyz'''::tsquery;
-            END IF;
-        END;
+        -- If no words survived filtering, default to a query that matches nothing.
+        IF v_tsquery IS NULL THEN
+            v_tsquery := '''nonexistentwordxyz'''::tsquery;
+        END IF;
     END IF;
 
     RETURN QUERY
@@ -620,7 +618,7 @@ BEGIN
         FROM fact_memories fm
         JOIN dim_category dc   ON fm.category_key = dc.category_key
         JOIN dim_context dctx  ON fm.context_key   = dctx.context_key
-        WHERE to_tsvector('english', fm.title || ' ' || fm.body) @@ v_tsquery
+        WHERE fm.is_deleted = false AND to_tsvector('english', fm.title || ' ' || fm.body) @@ v_tsquery
     )
     SELECT h.fact_id, h.slug, h.title, h.body, h.is_current, h.category,
            h.relevance_score_final,
@@ -742,7 +740,75 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+-- Function 10: Enumerate stored memories for review / duplicate detection / cleanup.
+-- No required filter so it can list everything; caller may pass a smaller limit to cap
+-- output size. Body returned in full (not truncated) so reviewers can judge content.
+CREATE OR REPLACE FUNCTION fn_list_memories(
+    p_limit INTEGER DEFAULT 200
+) RETURNS TABLE (
+    fact_id         INTEGER,
+    slug            TEXT,
+    title           TEXT,
+    body            TEXT,
+    is_current      BOOLEAN,
+    category        VARCHAR(50),
+    primary_context TEXT,
+    tags            TEXT[],
+    created_at      TIMESTAMPTZ
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        fm.id::INTEGER          AS fact_id,
+        fm.slug::TEXT           AS slug,
+        fm.title::TEXT          AS title,
+        fm.body                 AS body,
+        fm.is_current           AS is_current,
+        dc.category_name::VARCHAR(50)  AS category,
+        dctx.context_name::TEXT            AS primary_context,
+        (SELECT ARRAY_AGG(dt.tag_name::TEXT ORDER BY dt.tag_name)
+         FROM fact_memory_tags ft3
+         JOIN dim_tag dt ON ft3.tag_key = dt.tag_key
+         WHERE ft3.memory_id = fm.id)      AS tags,
+        fm.created_at           AS created_at
+    FROM fact_memories fm
+    JOIN dim_category dc       ON fm.category_key = dc.category_key
+    LEFT JOIN dim_context dctx ON fm.context_key   = dctx.context_key
+    WHERE fm.is_deleted = false
+    ORDER BY fm.is_current DESC, fm.updated_at DESC
+    LIMIT p_limit;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+
+-- Function 11: Soft-delete a memory by slug (reversible cleanup). Marks the row is_deleted = true and
+-- stamps deleted_at so it drops out of all active recall/list/preload paths while remaining in the table
+-- for audit/recovery. A future purge job can physically remove rows after a grace window (deferred until
+-- telemetry supports it). Returns -1 gracefully (not an exception) if no current, non-deleted fact matches,
+-- matching the graceful-fail convention of fn_supersede_fact / fn_verify_fact so silent background
+-- operations don't crash mid-conversation.
+CREATE OR REPLACE FUNCTION fn_delete_fact(
+    p_slug TEXT
+) RETURNS INTEGER AS $$
+DECLARE
+    v_mem_id INTEGER;
+BEGIN
+    -- Resolve slug to current, non-deleted fact (graceful: return -1 if not found instead of crashing).
+    -- The is_deleted guard keeps this consistent with the upgrade path (schema_v5.sql) so re-deleting an
+    -- already-soft-deleted slug returns -1 rather than a spurious success on fresh installs.
+    SELECT id INTO v_mem_id FROM fact_memories WHERE slug = p_slug AND is_current = true AND is_deleted = false;
+    IF NOT FOUND THEN
+        RAISE NOTICE 'fn_delete_fact: no current memory found with slug "%".', p_slug;
+        RETURN -1;  -- not found — caller can ignore silently for cleanup attempts
+    END IF;
+
+    UPDATE fact_memories SET is_deleted = true, deleted_at = NOW() WHERE id = v_mem_id AND is_deleted = false;
+    RETURN v_mem_id;
+END;
+$$ LANGUAGE plpgsql;
+
+
 COMMIT;
 
 -- Record this version as applied (outside transaction for safety)
-INSERT INTO ltm_initialized (schema_version) VALUES (4) ON CONFLICT DO NOTHING;
+INSERT INTO ltm_initialized (schema_version) VALUES (6) ON CONFLICT DO NOTHING;

@@ -77,14 +77,17 @@ const MIGRATION_FILES = (() => {
   if (!SCHEMA_SQL) return [];
   const dir = path.dirname(SCHEMA_SQL);
   try {
-    const entries = fs.readdirSync(dir).sort(); // sort ensures v1 < v2 < v3 ...
-    return entries
+    // Sort numerically by migration version so v10 sorts after v9 (lexicographic string sort would
+    // mis-order at two digits). Only schema_v<N>.sql files are considered.
+    const migrations = fs.readdirSync(dir)
       .map(name => {
         const match = name.match(/^schema_v(\d+)\.sql$/);
         if (!match) return null;
         return { version: parseInt(match[1], 10), path: path.join(dir, name) };
       })
-      .filter((x): x is { version: number; path: string } => !!x);
+      .filter((x): x is { version: number; path: string } => !!x)
+      .sort((a, b) => a.version - b.version);
+    return migrations;
   } catch {
     console.error("[ltm-mcp] Could not read sql/ directory — skipping migration discovery.");
     return [];
@@ -196,7 +199,7 @@ async function bootstrap(): Promise<{ connected: boolean; message?: string }> {
 
 // ─── MCP Server Setup ──────────────────────────────────────────────
 
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.1" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.1.2" });
 
 // Tool handler map — used by both MCP and HTTP transports.
 const TOOL_HANDLERS: Record<string, (params: Record<string, any>) => Promise<McpResult>> = {};
@@ -572,6 +575,79 @@ server.tool(
   handleSessionPreload
 );
 registerHandler("ltm_session_preload", handleSessionPreload);
+
+const handleListMemories = async ({ limit }: any) => {
+  if (!CONNECTION_STRING) return { content: [{ type: "text" as const, text: "🧠 LTM not configured." }] };
+
+  const p_limit = Math.min(Math.max(limit ?? 200, 1), 500); // clamp to [1, 500] to avoid context bloat.
+
+  const result = await withClient(async (client) => {
+    return client.query(
+      `SELECT fact_id, slug, title, body, is_current, category, primary_context, tags FROM fn_list_memories($1)`,
+      [p_limit]
+    );
+  });
+
+  if (!result.ok || !result.data?.rows.length) {
+    return { content: [{ type: "text" as const, text: "🧠 No memories found." }] };
+  }
+
+  const rows = result.data.rows;
+  let output = `📋 Listed ${rows.length} memory(ies):\n`;
+  for (const r of rows) {
+    const status = r.is_current ? "(current)" : "[superseded]";
+    output += `\n  • [${status}] ${r.title}`;
+    output += `\n    Slug: ${r.slug} | Category: ${r.category}`;
+    if (r.primary_context) output += ` | Context: ${r.primary_context}`;
+    if ((typeof r.body === "string" && r.body.length > 150)) {
+      output += `\n    Body: ${r.body.slice(0, 150)}…`;
+    } else {
+      output += `\n    Body: ${r.body || ""}`;
+    }
+    if (Array.isArray(r.tags) && r.tags.length > 0) {
+      output += `\n    Tags: ${r.tags.join(", ")}`;
+    }
+  }
+
+  return { content: [{ type: "text" as const, text: output }] };
+};
+
+server.tool(
+  "ltm_list_memories",
+  { limit: z.number().optional() },
+  handleListMemories
+);
+registerHandler("ltm_list_memories", handleListMemories);
+
+const handleDeleteFact = async ({ slug }: any) => {
+  if (!CONNECTION_STRING) return { content: [{ type: "text" as const, text: "🧠 LTM not configured." }] };
+
+  const result = await withClient(async (client) => {
+    return client.query(
+      `SELECT fn_delete_fact($1)`,
+      [slug]
+    );
+  });
+
+  if (!result.ok || !result.data?.rows.length) {
+    return { content: [{ type: "text" as const, text: "❌ Failed to delete." }] };
+  }
+
+  const factVal = result.data.rows[0]?.fn_delete_fact;
+  if (factVal === -1) {
+    return { content: [{ type: "text" as const, text: `⚠️ Slug "${slug}" not found — nothing to delete.` }] };
+  }
+
+  return { content: [{ type: "text" as const, text: `🗑️ Deleted memory "${slug}" (id=${factVal}) ✓` }] };
+};
+
+server.tool(
+  "ltm_delete_fact",
+  { slug: z.string() },
+  handleDeleteFact
+);
+registerHandler("ltm_delete_fact", handleDeleteFact);
+
 
 // ─── HTTP Transport for external tool invocation ──────────────
 

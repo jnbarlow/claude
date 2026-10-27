@@ -103,6 +103,7 @@ Migrations are applied automatically by the MCP server at bootstrap based on `sc
 | v1 → v2 | `sql/schema_v2.sql` | Widen VARCHAR columns (slug, title) for real-world usage |
 | v2 → v3 | `sql/schema_v3.sql` | Add OR mode support to `fn_recall_by_text` with `p_mode` parameter |
 | v3 → v4 | `sql/schema_v4.sql` | Fix broken OR mode tsquery construction (multi-word queries now work) |
+| v4 → v5 | `sql/schema_v5.sql` | Add `fn_list_memories` inventory + `fn_delete_fact` hard-delete route |
 
 All migrations are idempotent and safe to re-run. The server applies them in order and updates the version marker after each successful migration.
 
@@ -113,6 +114,7 @@ All migrations are idempotent and safe to re-run. The server applies them in ord
 | `scripts/user-prompt-eval.sh` | CREATED | UserPromptSubmit hook script |
 | `scripts/stop-eval.sh` | CREATED | Stop hook script |
 | `scripts/mcp-invoke.js` | CREATED | MCP invocation helper |
+| `sql/schema_v5.sql` | CREATED | Schema migration v5 — inventory + hard-delete route |
 | `sql/schema_v2.sql` | CREATED | Schema migration v2 |
 | `sql/schema.sql` | MODIFIED | Updated to reflect v2 state |
 | `hooks/hooks.json` | MODIFIED | Added UserPromptSubmit and Stop entries |

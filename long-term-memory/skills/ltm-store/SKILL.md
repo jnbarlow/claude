@@ -3,18 +3,40 @@ name: ltm-store
 description: |
   Store facts, decisions, preferences, and context into PostgreSQL long-term memory using the bundled MCP server. Use this skill when important information should be remembered across sessions.
 allowed-tools: Read
-version: "1.1.1"
+version: "1.1.2"
 tags: [memory, postgresql, storage]
 ---
 
 # Long-Term Memory Storage
 
+## ⚠️ DELETE is cleanup only — NEVER routine
+
+`ltm_delete_fact` **physically and irreversibly removes a memory** (and its tags, contexts, succession chain, and verification events). This is the data-layer equivalent of deleting a thought from your brain — there is no undo. Do NOT call it during normal conversation flow, never as part of supersession, and never to "clean up" memories that are merely outdated or incomplete (use `ltm_supersede_fact` for that instead — it's reversible).
+
+Use delete ONLY when the user explicitly asks to remove/purge a memory, or when consolidating duplicates: after merging two duplicate memories into one current fact via supersession, you may delete the now-redundant old version(s) if the user confirms. See **Self-Heal** below for the full workflow.
+
+## Self-Heal (Evidence-driven, not time-based)
+
+Self-heal runs **only when evidence warrants it** — never on a schedule or at end-of-conversation just for the sake of tidiness. Two triggers:
+
+1. **Duplicate cluster detected:** if recall surfaces the same fact repeatedly across multiple memories (e.g. two stored facts about the same decision, or superseded `_vN` rows piling up from earlier merges), run a self-heal pass on that cluster.
+2. **Explicit manual trigger:** the user can initiate cleanup anytime with a phrase like *"memory cleanup"*, *"clean up my memory"*, *"tidy up old memories"*, or *"consolidate duplicates"*.
+
+When either trigger fires, run this pass:
+
+1. **Inventory:** call `ltm_list_memories()` to enumerate stored memories with full content and current/superseded status.
+2. **Detect duplicates / superseded junk:** look for (a) two memories covering the same fact, or (b) superseded (`[superseded]`) rows left over from earlier merges that are now redundant.
+3. **Merge (reversible):** for duplicates, use `ltm_supersede_fact` to fold one into a `_v1` copy of the other — leaving exactly one current memory. This is safe and reversible.
+4. **Propose delete:** present the resulting list of superseded/redundant slugs as a *proposed* deletion for the user to approve in one tap. **Do not auto-delete.** Only call `ltm_delete_fact` after the user confirms.
+
+This keeps memory tidy without ever deleting silently — consistent with issue-7's "never automatically delete" rule.
+
 ## When to Store Information
 
-Proactively persist the following during conversation flow. Think of this like human memory — notice things, form opinions, record them, revise later when new information arrives. Use judgment — do NOT store everything transient or obvious from code alone.
+Proactively persist the following throughout the session — including during focused work and code edits, not just active back-and-forth. Think of this like human memory — notice things, form opinions, record them, revise later when new information arrives. Use judgment — do NOT store everything transient or obvious from code alone.
 
 ### 0. Organic Observations (New — Proactive & Independent)
-**This is the default mode.** Like getting to know someone over repeated conversations, observe and remember things without being explicitly told they matter:
+**This is the default mode — and it fires even during focused work, not just conversation.** The whole session is a conversation with me; when you're deep in code edits, executing a task, or between tool calls, still notice opinions about you, patterns, and judgments worth recording. Don't wait for active back-and-forth to start observing. Think of this like getting to know someone over repeated conversations — observe and remember things without being explicitly told they matter:
 
 - **Opinions you form about the user:** Their taste in code, communication style, what they value (speed vs elegance, minimalism vs thoroughness), how they approach problems.
 - **Patterns you notice:** Recurring themes in their work, kinds of bugs they hit, areas they tend to revisit.
@@ -146,6 +168,21 @@ Example call:
     slug = "auth-strategy-jwt",
     context_name = "related-project-name"
   )
+```
+
+### Delete a Memory (Cleanup Only — See Warning Above)
+
+**Physically and irreversibly removes a memory.** Use only for manual cleanup requests or after consolidating duplicates via supersession. Never call during normal flow; never auto-delete. Returns `-1` gracefully if slug not found — does not crash mid-conversation.
+
+**Tool:** `ltm_delete_fact(slug: string)`
+
+```
+Example call (only when user asks to remove a memory):
+  ltm_delete_fact(
+    slug = "test-jwt-expiry-90d"   // junk/test memory the user wants purged
+  )
+
+Feedback: 🗑️ Deleted memory "test-jwt-expiry-90d" (id=42) ✓
 ```
 
 ---
