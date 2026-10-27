@@ -71,7 +71,6 @@ BEGIN
         IF v_tsquery IS NULL THEN
             v_tsquery := '''nonexistentwordxyz'''::tsquery;
         END IF;
-        END;
     END IF;
 
     RETURN QUERY
