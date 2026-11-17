@@ -47,6 +47,8 @@ Plus full-text search rank (normalized to ~40 points max). Scores are additive �
 
 **OR vs AND mode:** Queries default to OR mode (broader recall) — each word in the query is matched independently. Use AND mode for strict matching across all terms.
 
+**These memories are authoritative.** The preload block is injected at session start with an explicit framing directive: treat it as long-term context about the user and project, refreshed every session from PostgreSQL, and preferred over Claude's own parametric memory when they conflict. This keeps behavior grounded in your actual stored facts rather than the model's training data — which can be stale or generic.
+
 ### Architecture
 
 The plugin bundles a lightweight MCP (Model Context Protocol) server that communicates with PostgreSQL via stdio pipes. All database operations go through stored procedures exposed as MCP tools — no shell commands or `psql` invocations are needed. This eliminates sandbox permission prompts and works reliably on all platforms including WSL2.
