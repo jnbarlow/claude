@@ -97,20 +97,22 @@ fi
 
 log_message "Decision detected: ${decision_text:0:100}..."
 
-# --- Step 3: Check session limit (backstop against runaway loops) ---------------
+# --- Step 3: Check daily store limit (backstop against runaway loops) ---------
 # Not a dedup guardrail — the real dedup is the min_score=40 check above. This
-# only bounds a long session where "we should" fires dozens of times so one
-# runaway loop can't spam hundreds of stores. 15 gives generous headroom while
-# still catching that; reset to 0 at SessionStart (bootstrap.sh).
+# only bounds a runaway where "we should" fires many times so one loop can't
+# spam hundreds of stores across an entire day. A daily cap (not per-session)
+# means a long multi-hour session captures decisions from start to finish; only
+# a runaway that runs for days is bounded. Counter file holds "count|YYYY-MM-DD".
 session_count=0
 if [ -f "$SESSION_LIMIT_FILE" ]; then
-  session_count=$(cat "$SESSION_LIMIT_FILE") || true
+  _stored=$(cat "$SESSION_LIMIT_FILE" 2>/dev/null) || true
+  session_count="${_stored%%|*}"
 fi
 
-log_message "Session store count: ${session_count:-0}/15"
+log_message "Daily store count: ${session_count:-0}/100"
 
-if [ "${session_count:-0}" -ge 15 ]; then
-  log_message "Session limit reached — skipping auto-store"
+if [ "${session_count:-0}" -ge 100 ]; then
+  log_message "Daily limit reached — skipping auto-store"
   exit 0
 fi
 
@@ -178,8 +180,10 @@ else
   log_message "Failed to store memory — curl result: ${store_result:-empty}"
 fi
 
-# Increment session counter.
+# Increment daily store counter (preserve the date suffix so bootstrap.sh can
+# detect a rollover and reset).
+TODAY=$(date '+%Y-%m-%d' 2>/dev/null) || true
 session_count=$(( ${session_count:-0} + 1 ))
-echo "$session_count" > "$SESSION_LIMIT_FILE"
+echo "${session_count}|${TODAY}" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
 
 exit 0

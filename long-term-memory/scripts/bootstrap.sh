@@ -64,13 +64,23 @@ if [ -z "$CONN" ]; then
 fi
 
 # --- Step 2b: Reset per-session auto-store counter ----------------------------
-# The Stop hook caps auto-stores at 5 per session via a counter file in
-# CLAUDE_PLUGIN_DATA. That directory is persistent, so the counter never resets
-# between sessions — after the first session it stays stuck at 5/5 and every
-# later session immediately skips auto-store ("Session limit reached"). Reset it
-# here at SessionStart so each new session gets a fresh budget of 5 stores.
+# The Stop hook caps auto-stores via a counter file in CLAUDE_PLUGIN_DATA. That
+# directory is persistent, so the counter must reset itself — but we want it to
+# reset on a *daily* cadence, not every session. A daily limit (rather than a
+# per-session one) lets a long multi-hour session capture decisions from start
+# to finish without losing the tail; only a runaway that runs for days is bounded.
+# Format in the file is "count|YYYY-MM-DD"; reset the count when the date changes.
 SESSION_LIMIT_FILE="${CLAUDE_PLUGIN_DATA:-/tmp}/ltm_session_store_count"
-echo "0" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
+TODAY=$(date '+%Y-%m-%d' 2>/dev/null) || true
+if [ -f "$SESSION_LIMIT_FILE" ]; then
+  _prev=$(cat "$SESSION_LIMIT_FILE" 2>/dev/null || true)
+  _prev_date="${_prev##*|}"
+  if [ "${_prev_date:-}" != "$TODAY" ]; then
+    echo "0|$TODAY" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
+  fi
+else
+  echo "0|$TODAY" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
+fi
 
 # --- Step 3: Session preload (identity, preferences, habits) ------------------
 
