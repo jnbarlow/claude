@@ -117,9 +117,13 @@ topic=$(echo "$decision_text" | sed "s/.*\(we should\|let's use\|I decided\|we'l
 log_message "Extracted topic: ${topic}"
 
 # Query LTM for existing memories on that topic via HTTP.
+# Use min_score=40 so only genuinely relevant matches count as duplicates — the
+# FTS fix made recall work again, but without a score floor any low-relevance hit
+# (e.g. "minimal" appearing in an unrelated body) would flag a false duplicate and
+# skip storing. This mirrors user-prompt-eval.sh's dedup behavior.
 existing=$(curl -s -X POST "http://127.0.0.1:${HTTP_PORT}/api/tool" \
   -H "Content-Type: application/json" \
-  -d "{\"tool\":\"ltm_recall_by_text\",\"params\":{\"query\":\"${topic}\"}}" \
+  -d "{\"tool\":\"ltm_recall_by_text\",\"params\":{\"query\":\"${topic}\",\"min_score\":40}}" \
   2>/dev/null) || true
 
 if [ -n "${existing:-}" ]; then

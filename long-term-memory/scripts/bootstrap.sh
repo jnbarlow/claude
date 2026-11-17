@@ -63,6 +63,15 @@ if [ -z "$CONN" ]; then
   exit 0
 fi
 
+# --- Step 2b: Reset per-session auto-store counter ----------------------------
+# The Stop hook caps auto-stores at 5 per session via a counter file in
+# CLAUDE_PLUGIN_DATA. That directory is persistent, so the counter never resets
+# between sessions — after the first session it stays stuck at 5/5 and every
+# later session immediately skips auto-store ("Session limit reached"). Reset it
+# here at SessionStart so each new session gets a fresh budget of 5 stores.
+SESSION_LIMIT_FILE="${CLAUDE_PLUGIN_DATA:-/tmp}/ltm_session_store_count"
+echo "0" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
+
 # --- Step 3: Session preload (identity, preferences, habits) ------------------
 
 PRELOAD=$(psql "$CONN" -t -A --no-align \
