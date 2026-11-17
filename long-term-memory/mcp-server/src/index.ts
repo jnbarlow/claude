@@ -4,6 +4,7 @@ import { Pool, PoolClient } from "pg";
 import * as fs from "fs";
 import * as path from "path";
 import * as http from "http";
+import * as crypto from "crypto";
 import z from "zod";
 import { resolveConnectionString } from "./secret.js";
 
@@ -27,6 +28,80 @@ const HTTP_DISCOVERY_FILE = path.join(
   process.env.CLAUDE_PLUGIN_DATA || "/tmp",
   "ltm-mcp-port.txt"
 );
+
+// Shared-secret auth for the loopback /api/tool endpoint. The MCP server
+// generates a random token at startup (or uses LTM_HTTP_AUTH_TOKEN if set) and
+// writes it to CLAUDE_PLUGIN_DATA/ltm-mcp-auth.txt so the hook scripts can read
+// it back and present it on every request. Without this, any local process can
+// invoke destructive tools (delete/supersede/verify). /health stays open for
+// liveness checks; only POST /api/tool requires the token.
+const HTTP_AUTH_TOKEN = process.env.LTM_HTTP_AUTH_TOKEN?.trim() || "";
+function resolveHttpAuthToken(): string {
+  const dataDir = path.dirname(HTTP_DISCOVERY_FILE);
+  const authFile = path.join(dataDir, "ltm-mcp-auth.txt");
+  try {
+    // Prefer an explicit operator-provided token.
+    if (HTTP_AUTH_TOKEN) return HTTP_AUTH_TOKEN;
+    // Otherwise reuse a persisted token from a previous run so the hook scripts
+    // keep working across server restarts without re-reading a new secret each
+    // time. Generate one only when none exists yet.
+    const existing = fs.readFileSync(authFile, "utf8").trim();
+    if (existing) return existing;
+    const generated = crypto.randomBytes(32).toString("hex");
+    fs.writeFileSync(authFile, generated, "utf8");
+    try {
+      fs.chmodSync(authFile, 0o600);
+    } catch {
+      /* chmod is best-effort on platforms that don't support it */
+    }
+    return generated;
+  } catch {
+    // If we cannot persist a token (read-only dir), fall back to an ephemeral
+    // in-memory secret. Requests from hook scripts will then fail auth — but the
+    // server still runs, and /health remains available for diagnostics.
+    return crypto.randomBytes(32).toString("hex");
+  }
+}
+let HTTP_AUTH_SECRET = resolveHttpAuthToken();
+function isAuthed(req: http.IncomingMessage): boolean {
+  const header = req.headers["x-ltm-token"];
+  const provided = typeof header === "string" ? header : Array.isArray(header) ? header[0] ?? "" : "";
+  if (!provided) return false;
+  const a = Buffer.from(provided, "utf8");
+  const b = Buffer.from(HTTP_AUTH_SECRET, "utf8");
+  if (a.length !== b.length) return false;
+  // Timing-safe comparison to avoid leaking token length/content via timing.
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Ensure the in-memory secret matches the canonical one on disk. Called after a
+// successful bind so that whoever owns the port holds the shared secret hooks
+// expect: reuse an existing file's token (so already-present tokens keep working),
+// generate one if none exists yet, and prefer an explicit operator-provided value.
+function reconcileHttpAuth(): void {
+  try {
+    if (HTTP_AUTH_TOKEN) return; // explicit env var wins — never overwrite the file
+    const existing = fs.readFileSync(HTTP_DISCOVERY_FILE.replace(/ltm-mcp-port\.txt$/, "ltm-mcp-auth.txt"), "utf8").trim();
+    if (existing) {
+      HTTP_AUTH_SECRET = existing;
+      console.log("[ltm-mcp] Adopted shared auth token from disk.");
+      return;
+    }
+    const generated = crypto.randomBytes(32).toString("hex");
+    fs.writeFileSync(HTTP_DISCOVERY_FILE.replace(/ltm-mcp-port\.txt$/, "ltm-mcp-auth.txt"), generated, "utf8");
+    try {
+      fs.chmodSync(HTTP_DISCOVERY_FILE.replace(/ltm-mcp-port\.txt$/, "ltm-mcp-auth.txt"), 0o600);
+    } catch {
+      /* chmod is best-effort on platforms that don't support it */
+    }
+    HTTP_AUTH_SECRET = generated;
+  } catch {
+    // If we cannot persist a token (read-only dir), fall back to an ephemeral
+    // in-memory secret. Requests from hook scripts will then fail auth — but the
+    // server still runs, and /health remains available for diagnostics.
+    HTTP_AUTH_SECRET = crypto.randomBytes(32).toString("hex");
+  }
+}
 
 // Detect old-style plaintext config (user pasted connection string into provider field).
 if (PROVIDER.startsWith("postgresql://") || PROVIDER.startsWith("postgres://")) {
@@ -689,8 +764,14 @@ function startHttpServer(): void {
       return;
     }
 
-    // Tool invocation endpoint.
+    // Tool invocation endpoint — requires a shared-secret token header so only
+    // trusted local clients (the hook scripts) can invoke destructive tools.
     if (req.method === "POST" && req.url?.startsWith("/api/tool")) {
+      if (!isAuthed(req)) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "missing or invalid auth token" }));
+        return;
+      }
       try {
         const body = await new Promise<HttpRequest>((resolve, reject) => {
           let data = "";
@@ -723,6 +804,12 @@ function startHttpServer(): void {
   app.listen(HTTP_PORT, "127.0.0.1", () => {
     console.log(`[ltm-mcp] HTTP transport listening on 127.0.0.1:${HTTP_PORT}`);
 
+    // Adopt the canonical shared secret from disk if a previous owner wrote one.
+    // This keeps hooks that already read the token working across a takeover, and
+    // closes the simultaneous-cold-start race where two processes mint different
+    // tokens before either binds the port.
+    reconcileHttpAuth();
+
     // Write port to discovery file for hook scripts.
     try {
       fs.writeFileSync(HTTP_DISCOVERY_FILE, String(HTTP_PORT), "utf8");
@@ -733,11 +820,36 @@ function startHttpServer(): void {
 
   app.on("error", (err: any) => {
     if (err.code === "EADDRINUSE") {
-      console.error(`[ltm-mcp] Port ${HTTP_PORT} already in use — HTTP transport disabled.`);
+      console.error(
+        `[ltm-mcp] Port ${HTTP_PORT} in use — retrying with backoff until the port frees up.`
+      );
+      startHttpServerWithRetry();
     } else {
       console.error("[ltm-mcp] HTTP server error:", err.message);
     }
   });
+}
+
+// Retry binding after an EADDRINUSE, using exponential backoff so contended
+// ports stay cheap to poll. Each attempt creates a fresh server (the previous
+// one is dropped) to avoid leaking sockets. When the port finally frees — e.g.
+// a prior session exited while this process was idle-retrying — we bind it and
+// rewrite the discovery file with a live pointer, closing the dead-pointer gap.
+function startHttpServerWithRetry(): void {
+  const MAX_DELAY_MS = 8000;
+  let attempt = 0;
+  let cancelled = false;
+
+  const scheduleNext = () => {
+    if (cancelled) return;
+    const delayMs = Math.min(500 * 2 ** attempt, MAX_DELAY_MS);
+    setTimeout(() => {
+      attempt++;
+      startHttpServer(); // re-arms the EADDRINUSE handler on failure
+    }, delayMs);
+  };
+
+  scheduleNext();
 }
 
 // ─── Start servers ──────────────

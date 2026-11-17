@@ -27,6 +27,20 @@ if [ -z "${HTTP_PORT:-}" ] || [ "$HTTP_PORT" -lt 1 ] 2>/dev/null; then
   exit 0  # Invalid port.
 fi
 
+# Shared-secret auth token for the loopback /api/tool endpoint. The MCP server
+# writes it to CLAUDE_PLUGIN_DATA/ltm-mcp-auth.txt at startup (or uses
+# LTM_HTTP_AUTH_TOKEN). Read it here so both curl calls can present it; when no
+# token exists we send an empty header, which the server rejects with 401 —
+# failing closed rather than allowing unauthenticated tool access.
+HTTP_AUTH_FILE="${CLAUDE_PLUGIN_DATA:-/tmp}/ltm-mcp-auth.txt"
+if [ -n "${LTM_HTTP_AUTH_TOKEN:-}" ]; then
+  HTTP_AUTH_TOKEN="$LTM_HTTP_AUTH_TOKEN"
+elif [ -f "$HTTP_AUTH_FILE" ]; then
+  HTTP_AUTH_TOKEN=$(cat "$HTTP_AUTH_FILE" 2>/dev/null | tr -d '[:space:]') || true
+else
+  HTTP_AUTH_TOKEN=""
+fi
+
 # --- Step 1: Read JSON input from stdin --------------------------------------------
 
 if ! read -r json_input; then
@@ -110,6 +124,7 @@ log_message "Extracted topic: ${topic}"
 # skip storing. This mirrors user-prompt-eval.sh's dedup behavior.
 existing=$(curl -s -X POST "http://127.0.0.1:${HTTP_PORT}/api/tool" \
   -H "Content-Type: application/json" \
+  -H "X-LTM-Token: ${HTTP_AUTH_TOKEN}" \
   -d "{\"tool\":\"ltm_recall_by_text\",\"params\":{\"query\":\"${topic}\",\"min_score\":40}}" \
   2>/dev/null) || true
 
@@ -182,6 +197,7 @@ CURRENT_CONTEXT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 # Store memory via HTTP — pass actual project path as context for future context-aware recall.
 store_result=$(curl -s -X POST "http://127.0.0.1:${HTTP_PORT}/api/tool" \
   -H "Content-Type: application/json" \
+  -H "X-LTM-Token: ${HTTP_AUTH_TOKEN}" \
   -d "{\"tool\":\"ltm_store_memory\",\"params\":{\"slug\":\"decision-${slug}\",\"title\":\"$(echo "$topic" | head -c 50)\",\"body\":\"${summary}\",\"category\":\"decision\",\"context\":\"${CURRENT_CONTEXT}\",\"tags\":${tags_json}}}" \
   2>/dev/null) || true
 

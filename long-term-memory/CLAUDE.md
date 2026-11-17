@@ -68,7 +68,7 @@ Bump versions together across these locations when releasing:
 - `mcp-server/package.json` → version field
 - `.claude-plugin/plugin.json` → version field
 - Skills under `skills/*/SKILL.md` → frontmatter version
-- Server identity in `mcp-server/src/index.ts` line ~160 (McpServer constructor)
+- Server identity in `mcp-server/src/index.ts` line ~202 (McpServer constructor)
 
 ## Commit Messages
 
