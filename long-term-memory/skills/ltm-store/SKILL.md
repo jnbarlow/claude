@@ -3,7 +3,7 @@ name: ltm-store
 description: |
   Store facts, decisions, preferences, and context into PostgreSQL long-term memory using the bundled MCP server. Use this skill when important information should be remembered across sessions.
 allowed-tools: Read
-version: "1.1.2"
+version: "1.1.3"
 tags: [memory, postgresql, storage]
 ---
 
@@ -34,6 +34,12 @@ This keeps memory tidy without ever deleting silently — consistent with issue-
 ## When to Store Information
 
 Proactively persist the following throughout the session — including during focused work and code edits, not just active back-and-forth. Think of this like human memory — notice things, form opinions, record them, revise later when new information arrives. Use judgment — do NOT store everything transient or obvious from code alone.
+
+### Auto-Store Cap (How Hooks Work)
+
+Auto-stores are handled by the Stop hook (`scripts/stop-eval.sh`), which fires after each assistant response and stores high-value items automatically — you don't need to manually store them. There is a **daily cap of 100 auto-stores per calendar day** (reset at midnight UTC) so a single runaway loop can't spam the database. A long multi-hour session captures decisions from start to finish; only a multi-day runaway is bounded.
+
+If you ever see a notice like *"⚠️ LTM daily store cap reached (100/day) with a NEW decision worth storing"*, it means we hit the cap and skipped a genuinely new item. It's safe to raise — just say so, and I'll bump the `100` limit in [scripts/stop-eval.sh](../../scripts/stop-eval.sh). Duplicates are always skipped silently regardless of the cap, so this only affects brand-new items.
 
 ### 0. Organic Observations (New — Proactive & Independent)
 **This is the default mode — and it fires even during focused work, not just conversation.** The whole session is a conversation with me; when you're deep in code edits, executing a task, or between tool calls, still notice opinions about you, patterns, and judgments worth recording. Don't wait for active back-and-forth to start observing. Think of this like getting to know someone over repeated conversations — observe and remember things without being explicitly told they matter:

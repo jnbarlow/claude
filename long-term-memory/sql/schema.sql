@@ -571,17 +571,19 @@ BEGIN
     IF p_mode = 'AND' THEN
         v_tsquery := plainto_tsquery('english', p_query);  -- AND between terms (strict matching)
     ELSE
-        -- OR mode: treat each space-separated word as a literal lexeme. quote_literal() forces bare
-        -- & / | / ( ) etc. to be search text, not tsquery syntax — so "C++ & Rust" matches those words.
-        -- lower() is applied before quoting because a quoted tsquery lexeme ('Rust') is case-sensitive;
-        -- FTS vectors store lowercase lexemes, so we must lowercase first for case-insensitive matching.
-        -- string_agg builds the whole expression and casts ONCE; building incrementally with || ' | ' on
-        -- tsquery values would fail ('syntax error in tsquery: " | "'). NULL when no words survive -> fall
-        -- back to a query that matches nothing.
-        SELECT string_agg(quote_literal(lower(trim(both ' ''"' FROM value))), ' | ')::tsquery
+        -- OR mode: derive each lexeme from its own to_tsvector('english', word), which both
+        -- stems the word and quotes it safely. quote_literal() on the resulting lexemes keeps
+        -- bare & / | / ( ) etc. as search text rather than tsquery syntax — so "C++ & Rust"
+        -- matches those words literally ('c' | 'rust') instead of throwing a tsquery error.
+        -- string_agg builds the whole expression and casts ONCE; building incrementally with ||
+        -- ' | ' on tsquery values would fail ('syntax error in tsquery: " | "'). NULL when no
+        -- words survive -> fall back to a query that matches nothing (see below).
+        SELECT string_agg(quote_literal(l), ' | ')::tsquery
           INTO v_tsquery
           FROM unnest(string_to_array(p_query, ' ')) AS value
-          WHERE length(trim(both ' ''"' FROM value)) > 0;
+               , LATERAL (SELECT tsvector_to_array(to_tsvector('english', value)) AS lex) t
+               , UNNEST(t.lex) AS l
+          WHERE length(trim(value)) > 0;
 
         -- If no words survived filtering, default to a query that matches nothing.
         IF v_tsquery IS NULL THEN
@@ -811,4 +813,4 @@ $$ LANGUAGE plpgsql;
 COMMIT;
 
 -- Record this version as applied (outside transaction for safety)
-INSERT INTO ltm_initialized (schema_version) VALUES (6) ON CONFLICT DO NOTHING;
+INSERT INTO ltm_initialized (schema_version) VALUES (7) ON CONFLICT DO NOTHING;

@@ -27,6 +27,20 @@ if [ -z "${HTTP_PORT:-}" ] || [ "$HTTP_PORT" -lt 1 ] 2>/dev/null; then
   exit 0  # Invalid port.
 fi
 
+# Shared-secret auth token for the loopback /api/tool endpoint. The MCP server
+# writes it to CLAUDE_PLUGIN_DATA/ltm-mcp-auth.txt at startup (or uses
+# LTM_HTTP_AUTH_TOKEN). Read it here so both curl calls can present it; when no
+# token exists we send an empty header, which the server rejects with 401 —
+# failing closed rather than allowing unauthenticated tool access.
+HTTP_AUTH_FILE="${CLAUDE_PLUGIN_DATA:-/tmp}/ltm-mcp-auth.txt"
+if [ -n "${LTM_HTTP_AUTH_TOKEN:-}" ]; then
+  HTTP_AUTH_TOKEN="$LTM_HTTP_AUTH_TOKEN"
+elif [ -f "$HTTP_AUTH_FILE" ]; then
+  HTTP_AUTH_TOKEN=$(cat "$HTTP_AUTH_FILE" 2>/dev/null | tr -d '[:space:]') || true
+else
+  HTTP_AUTH_TOKEN=""
+fi
+
 # --- Step 1: Read JSON input from stdin --------------------------------------------
 
 if ! read -r json_input; then
@@ -97,38 +111,60 @@ fi
 
 log_message "Decision detected: ${decision_text:0:100}..."
 
-# --- Step 3: Check session limit (max 5 auto-stores per session) -------------------
-session_count=0
-if [ -f "$SESSION_LIMIT_FILE" ]; then
-  session_count=$(cat "$SESSION_LIMIT_FILE") || true
-fi
-
-log_message "Session store count: ${session_count:-0}/5"
-
-if [ "${session_count:-0}" -ge 5 ]; then
-  log_message "Session limit reached — skipping auto-store"
-  exit 0
-fi
-
-# --- Step 4: Extract topic and query LTM for duplicates ----------------------------
+# --- Step 3: Extract topic and query LTM for duplicates ----------------------------
 # Use first meaningful phrase from decision text as topic.
 
 topic=$(echo "$decision_text" | sed "s/.*\(we should\|let's use\|I decided\|we'll go with\|going to use\|picking\)[[:space:]]*//" | cut -d' ' -f1-5)
 log_message "Extracted topic: ${topic}"
 
 # Query LTM for existing memories on that topic via HTTP.
+# Use min_score=40 so only genuinely relevant matches count as duplicates — the
+# FTS fix made recall work again, but without a score floor any low-relevance hit
+# (e.g. "minimal" appearing in an unrelated body) would flag a false duplicate and
+# skip storing. This mirrors user-prompt-eval.sh's dedup behavior.
 existing=$(curl -s -X POST "http://127.0.0.1:${HTTP_PORT}/api/tool" \
   -H "Content-Type: application/json" \
-  -d "{\"tool\":\"ltm_recall_by_text\",\"params\":{\"query\":\"${topic}\"}}" \
+  -H "X-LTM-Token: ${HTTP_AUTH_TOKEN}" \
+  -d "{\"tool\":\"ltm_recall_by_text\",\"params\":{\"query\":\"${topic}\",\"min_score\":40}}" \
   2>/dev/null) || true
 
+is_duplicate=false
 if [ -n "${existing:-}" ]; then
   existing_text=$(echo "$existing" | jq -r '.content[0].text // empty' 2>/dev/null) || true
   if [ -n "${existing_text:-}" ] && ! echo "$existing_text" | grep -q "No matching memories"; then
-    # Similar memory exists — skip auto-store.
-    log_message "Duplicate detected — skipping auto-store (similar memory exists)"
-    exit 0
+    is_duplicate=true
+    log_message "Duplicate detected — no new memory to store"
   fi
+fi
+
+# --- Step 4: Check daily store limit (backstop against runaway loops) ----------
+# Not a dedup guardrail — the real dedup is the min_score=40 check above. This
+# only bounds a runaway where "we should" fires many times so one loop can't
+# spam hundreds of stores across an entire day. A daily cap (not per-session)
+# means a long multi-hour session captures decisions from start to finish; only
+# a runaway that runs for days is bounded. Counter file holds "count|YYYY-MM-DD".
+session_count=0
+if [ -f "$SESSION_LIMIT_FILE" ]; then
+  _stored=$(cat "$SESSION_LIMIT_FILE" 2>/dev/null) || true
+  session_count="${_stored%%|*}"
+fi
+
+log_message "Daily store count: ${session_count:-0}/100"
+
+if [ "${session_count:-0}" -ge 100 ]; then
+  # At the cap. Only nag when there's a genuinely NEW item to store — nothing
+  # is lost for duplicates, so no need to interrupt. When capped + new, print a
+  # note that enters model context so Claude can offer to reset/raise the cap.
+  if [ "$is_duplicate" = "false" ]; then
+    log_message "Daily limit reached AND item is new — surfacing cap notice"
+    echo ""
+    echo "⚠️ LTM daily store cap reached (100/day) with a NEW decision worth storing."
+    echo "   It was skipped to avoid runaway spam. If you want more auto-stores today,"
+    echo "   say so and I'll reset or raise the daily cap in scripts/stop-eval.sh."
+  else
+    log_message "Daily limit reached but item is a duplicate — no notice needed"
+  fi
+  exit 0
 fi
 
 log_message "No duplicate found — proceeding to store"
@@ -161,6 +197,7 @@ CURRENT_CONTEXT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 # Store memory via HTTP — pass actual project path as context for future context-aware recall.
 store_result=$(curl -s -X POST "http://127.0.0.1:${HTTP_PORT}/api/tool" \
   -H "Content-Type: application/json" \
+  -H "X-LTM-Token: ${HTTP_AUTH_TOKEN}" \
   -d "{\"tool\":\"ltm_store_memory\",\"params\":{\"slug\":\"decision-${slug}\",\"title\":\"$(echo "$topic" | head -c 50)\",\"body\":\"${summary}\",\"category\":\"decision\",\"context\":\"${CURRENT_CONTEXT}\",\"tags\":${tags_json}}}" \
   2>/dev/null) || true
 
@@ -170,8 +207,10 @@ else
   log_message "Failed to store memory — curl result: ${store_result:-empty}"
 fi
 
-# Increment session counter.
+# Increment daily store counter (preserve the date suffix so bootstrap.sh can
+# detect a rollover and reset).
+TODAY=$(date '+%Y-%m-%d' 2>/dev/null) || true
 session_count=$(( ${session_count:-0} + 1 ))
-echo "$session_count" > "$SESSION_LIMIT_FILE"
+echo "${session_count}|${TODAY}" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
 
 exit 0

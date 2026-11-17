@@ -3,7 +3,7 @@ name: ltm-retrieve
 description: |
   Query long-term memory using the bundled MCP server. Recall facts, decisions, preferences relevant to the current task.
 allowed-tools: Read, Glob
-version: "1.1.2"
+version: "1.1.3"
 tags: [memory, postgresql, recall]
 ---
 
@@ -20,7 +20,7 @@ This is how setup guidance reaches users — without this relay they'd never kno
 
 ## 🔄 Session Preload (Automatic)
 
-At session start, bootstrap.sh calls `fn_session_preload(10)` and injects results into model context via stdout. This pre-loads up to 10 current memories weighted by category priority:
+At session start, bootstrap.sh calls `fn_session_preload(8)` and injects results into model context via stdout. This pre-loads up to 10 current memories weighted by category priority:
 
 | Category | Priority Weight | Loaded First? |
 |---|---|---|
@@ -178,6 +178,36 @@ Found N memories about [topic]:
 ```
 🧠 No matching memories for [topic].
 ```
+
+---
+
+## Attribution (Remembering Aloud)
+
+When a recalled memory actually shaped your response — not every lookup, but the ones that changed what you said or did — acknowledge it. It tells the user where an idea came from and builds trust that this isn't made up on the spot. But do it like a person with good memory: selectively, and with variety. Don't announce every recall; reserve the "I remember" for moments when the memory genuinely mattered.
+
+**Lead with selectivity.** Attribute when a recalled fact changed your answer, corrected a plan, or surfaced context that shaped what you built. Skip it for background lookups where the memory was supportive but not decisive. The natural signal is `ltm_verify_fact` — if you verified a memory and then used it, that's a strong "this mattered" indicator. Verify-and-use → lean toward attributing; read-only lookup → usually skip.
+
+**Vary like prose.** Just as varying sentence length keeps writing interesting, vary how often you attribute based on recency. If you just said "I remember X" two turns ago, hold off — let the memory speak for itself until there's a genuine reason to name it again. Conversely, if it's been a while since any attribution and something notable resurfaces, naming it feels natural rather than repetitive. Increase frequency after a stretch of silence; decrease it when you've just been transparent. Judge by rhythm, not on a fixed schedule.
+
+**Mix your verbs.** Don't default to "I remembered we talked about X" every time — rotate through phrasings so it reads like genuine recollection, not a canned tag:
+
+- "This rings a bell — I think we landed on X before."
+- "We covered this earlier: X."
+- "Funny you mention it — I remember deciding X about this."
+- "Something in my notes came up for this: X."
+- "I recall us working through X; here's where we were."
+- "This connects to something I stored about X."
+- "We settled on X a while back — worth revisiting?"
+- "A memory just surfaced that's relevant: X."
+- "I've got a note on this from before: X."
+- "This matches what we decided around X."
+- "I think we talked our way through X already."
+- "One of my stored memories lines up with this: X."
+- "We were here before — X came up when we did Y."
+- "Heads up, I pulled this from earlier context about X."
+- "This is a callback to something we figured out: X."
+
+Keep it casual and short. If the phrasing feels mechanical or like filler, pick another one or skip it entirely — the goal is that the user notices they can trust your memory, not that you tag every contribution.
 
 ---
 

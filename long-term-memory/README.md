@@ -16,7 +16,7 @@ Human-like memory for Claude Code. Notices patterns, forms opinions about you an
 
 ### Session Preload
 
-At session start, the bootstrap hook fires and calls `fn_session_preload(10)`, which loads up to 10 current memories into model context. Memories are scored by **category priority** (configurable in `recall_weights`), so identity facts load first:
+At session start, the bootstrap hook fires and calls `fn_session_preload` (default limit 8), which loads up to that many current memories into model context. Memories are scored by **category priority** (configurable in `recall_weights`), so identity facts load first:
 
 | Category | Priority Weight | Purpose |
 |---|---|---|
@@ -46,6 +46,8 @@ Plus full-text search rank (normalized to ~40 points max). Scores are additive �
 **Minimum score filtering:** The MCP server accepts an optional `min_score` parameter (default: no filter). Set it to 40+ to drop low-relevance noise (single tag hit without context match).
 
 **OR vs AND mode:** Queries default to OR mode (broader recall) — each word in the query is matched independently. Use AND mode for strict matching across all terms.
+
+**These memories are authoritative.** The preload block is injected at session start with an explicit framing directive: treat it as long-term context about the user and project, refreshed every session from PostgreSQL, and preferred over Claude's own parametric memory when they conflict. This keeps behavior grounded in your actual stored facts rather than the model's training data — which can be stale or generic.
 
 ### Architecture
 
@@ -295,7 +297,7 @@ Fires after each assistant response completes. Evaluates whether the conversatio
 
 **Configuration:** `hooks/hooks.json` → `Stop` event  
 **Script:** `scripts/stop-eval.sh`  
-**Session Limit:** Max 5 auto-stores per session (configurable via `/tmp/ltm_session_store_count`)
+**Daily Limit:** Max 100 auto-stores per calendar day (resets at midnight UTC — see "Auto-Store Cap" in the [ltm-store skill](./skills/ltm-store/SKILL.md))
 
 #### How It Works
 
@@ -307,7 +309,7 @@ Fires after each assistant response completes. Evaluates whether the conversatio
 
 2. **Duplicate Check**: Queries LTM for existing memories on the extracted topic — skips if similar memory exists
 
-3. **Session Limit**: Respects max 5 auto-stores per session (resets when Claude Code restarts)
+3. **Daily Limit**: Respects a cap of 100 auto-stores per calendar day (resets at midnight UTC via date-rollover in `bootstrap.sh`) so one runaway loop can't spam the database; a long multi-hour session captures decisions from start to finish. Duplicates are always skipped silently regardless of the cap.
 
 4. **Auto-Store**: Calls `ltm_store_memory` with category "decision" and auto-generated tags
 
@@ -327,7 +329,7 @@ cat /tmp/ltm_stop_hook_debug.log | tail -20
 ```
 [2026-09-03 14:30:00] Signal 2 (resolution marker) detected
 [2026-09-03 14:30:00] Decision detected: The plan is to use Redis for caching...
-[2026-09-03 14:30:00] Session store count: 1/5
+[2026-09-03 14:30:00] Daily store count: 1/100
 [2026-09-03 14:30:00] Extracted topic: The plan is to use Redis for caching
 [2026-09-03 14:30:00] No duplicate found — proceeding to store
 [2026-09-03 14:30:00] Storing memory: slug=decision-the-plan-is-to-use-redis-for-caching, topic=The plan is to use Redis for caching
@@ -338,14 +340,11 @@ cat /tmp/ltm_stop_hook_debug.log | tail -20
 | Entry | Meaning |
 |-------|---------|
 | `Signal N detected` | Which pattern matched (1-4) |
-| `Session limit reached — skipping auto-store` | Hit the 5-per-session cap |
+| `Daily limit reached — skipping auto-store` | Hit the 100-per-day cap |
 | `Duplicate detected — skipping auto-store` | Similar memory already exists |
 | `Failed to store memory` | MCP server unavailable or LTM error |
 
-**Reset session counter:**
-```bash
-echo "0" > /tmp/ltm_session_store_count
-```
+The daily counter is stored in `${CLAUDE_PLUGIN_DATA}/ltm_session_store_count` as `count|YYYY-MM-DD`. It resets itself at midnight UTC — no manual reset needed. If you ever need to raise the cap, edit the `100` limit in [scripts/stop-eval.sh](./scripts/stop-eval.sh).
 
 ## Architecture
 
@@ -405,6 +404,14 @@ claude plugin update long-term-memory@jnbarlow-claude   # now safe to update
 ```
 
 **Upstream issue:** [anthropics/claude-code#72678](https://github.com/anthropics/claude-code/issues/72678) — plugin updates fail silently when MCP server holds open file handles. Watch/star that issue for progress on a fix (atomic rename instead of in-place copy, or automatic restart during update).
+
+### Auth token dependency after updating to the shared-secret version
+
+**Symptom:** After updating to the version that adds loopback `/api/tool` auth, hook scripts fail with `401 missing or invalid auth token` even though the MCP server started fine.
+
+**Cause:** The HTTP endpoint now requires a shared secret (`X-LTM-Token`) persisted at `~/.claude/plugins/data/long-term-memory/ltm-mcp-auth.txt`. This file lives in plugin *data*, separate from the plugin *code* — so an update that wipes your data dir (or a fresh install of updated code) leaves hooks without a token. They send an empty header, the server rejects with 401, and auto-store silently fails until the token regenerates on next clean startup.
+
+**Workaround:** Update in place rather than remove-and-reinstall — this preserves `ltm-mcp-auth.txt`. If you've wiped the data dir after updating to a version that ships auth, restart Claude Code once so the server rewrites the token (or set `LTM_HTTP_AUTH_TOKEN` explicitly). Verify with `/plugin` and by checking `bootstrap_errors.log`.
 
 ## Migrating from Plaintext Config
 

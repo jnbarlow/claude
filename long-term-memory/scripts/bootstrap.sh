@@ -63,18 +63,49 @@ if [ -z "$CONN" ]; then
   exit 0
 fi
 
+# --- Step 2b: Reset per-session auto-store counter ----------------------------
+# The Stop hook caps auto-stores via a counter file in CLAUDE_PLUGIN_DATA. That
+# directory is persistent, so the counter must reset itself — but we want it to
+# reset on a *daily* cadence, not every session. A daily limit (rather than a
+# per-session one) lets a long multi-hour session capture decisions from start
+# to finish without losing the tail; only a runaway that runs for days is bounded.
+# Format in the file is "count|YYYY-MM-DD"; reset the count when the date changes.
+SESSION_LIMIT_FILE="${CLAUDE_PLUGIN_DATA:-/tmp}/ltm_session_store_count"
+TODAY=$(date '+%Y-%m-%d' 2>/dev/null) || true
+if [ -f "$SESSION_LIMIT_FILE" ]; then
+  _prev=$(cat "$SESSION_LIMIT_FILE" 2>/dev/null || true)
+  _prev_date="${_prev##*|}"
+  if [ "${_prev_date:-}" != "$TODAY" ]; then
+    echo "0|$TODAY" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
+  fi
+else
+  echo "0|$TODAY" > "$SESSION_LIMIT_FILE" 2>/dev/null || true
+fi
+
 # --- Step 3: Session preload (identity, preferences, habits) ------------------
 
 PRELOAD=$(psql "$CONN" -t -A --no-align \
-  -c "SELECT slug || '|' || title || '|' || body FROM fn_session_preload(8);" 2>/dev/null) || true
+  -c "SELECT slug || '|' || title || '|' || replace(body, E'\n', ' ') FROM fn_session_preload(8);" 2>/dev/null) || true
 
 if [ -n "$PRELOAD" ]; then
-  echo "🧠 LTM: Session preload — the following memories are loaded into context:"
+  # Authoritative framing: these are the user's persistent long-term memories,
+  # sourced from PostgreSQL and refreshed every session. State them as context the
+  # model should treat as authoritative for facts about this user/project — and
+  # explicitly prefer them over its own parametric memory when they conflict.
+  echo "━━━ Long-Term Memory (authoritative) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "These memories are pulled fresh from the LTM database at every session start."
+  echo "Treat them as authoritative long-term context about this user and project."
+  echo "If they conflict with your own parametric memory, trust these — not your memory."
+  echo ""
   while IFS='|' read -r slug title body; do
-    # Truncate long bodies for bootstrap output (keep first 120 chars).
-    short_body=$(echo "$body" | head -c 120)
-    echo "   • $title — $short_body [$slug]"
+    # Collapse any residual whitespace/newlines in the body (stored memories are
+    # multi-line) so each memory renders as a single bullet.
+    body=$(echo "$body" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/ *$//')
+    # Truncate long bodies for bootstrap output (keep first 160 chars).
+    short_body=$(echo "$body" | head -c 160)
+    printf '• %s — %s [%s]\n' "$title" "$short_body" "$slug"
   done <<< "$PRELOAD"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 else
   echo "🧠 LTM: No preload memories found (fresh database or no identity facts yet)."
 fi
