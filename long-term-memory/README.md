@@ -405,6 +405,14 @@ claude plugin update long-term-memory@jnbarlow-claude   # now safe to update
 
 **Upstream issue:** [anthropics/claude-code#72678](https://github.com/anthropics/claude-code/issues/72678) — plugin updates fail silently when MCP server holds open file handles. Watch/star that issue for progress on a fix (atomic rename instead of in-place copy, or automatic restart during update).
 
+### Auth token dependency after updating to the shared-secret version
+
+**Symptom:** After updating to the version that adds loopback `/api/tool` auth, hook scripts fail with `401 missing or invalid auth token` even though the MCP server started fine.
+
+**Cause:** The HTTP endpoint now requires a shared secret (`X-LTM-Token`) persisted at `~/.claude/plugins/data/long-term-memory/ltm-mcp-auth.txt`. This file lives in plugin *data*, separate from the plugin *code* — so an update that wipes your data dir (or a fresh install of updated code) leaves hooks without a token. They send an empty header, the server rejects with 401, and auto-store silently fails until the token regenerates on next clean startup.
+
+**Workaround:** Update in place rather than remove-and-reinstall — this preserves `ltm-mcp-auth.txt`. If you've wiped the data dir after updating to a version that ships auth, restart Claude Code once so the server rewrites the token (or set `LTM_HTTP_AUTH_TOKEN` explicitly). Verify with `/plugin` and by checking `bootstrap_errors.log`.
+
 ## Migrating from Plaintext Config
 
 If you previously stored a plaintext connection string via the plugin settings (`LTM_DB`), follow these steps:
