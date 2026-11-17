@@ -97,15 +97,19 @@ fi
 
 log_message "Decision detected: ${decision_text:0:100}..."
 
-# --- Step 3: Check session limit (max 5 auto-stores per session) -------------------
+# --- Step 3: Check session limit (backstop against runaway loops) ---------------
+# Not a dedup guardrail — the real dedup is the min_score=40 check above. This
+# only bounds a long session where "we should" fires dozens of times so one
+# runaway loop can't spam hundreds of stores. 15 gives generous headroom while
+# still catching that; reset to 0 at SessionStart (bootstrap.sh).
 session_count=0
 if [ -f "$SESSION_LIMIT_FILE" ]; then
   session_count=$(cat "$SESSION_LIMIT_FILE") || true
 fi
 
-log_message "Session store count: ${session_count:-0}/5"
+log_message "Session store count: ${session_count:-0}/15"
 
-if [ "${session_count:-0}" -ge 5 ]; then
+if [ "${session_count:-0}" -ge 15 ]; then
   log_message "Session limit reached — skipping auto-store"
   exit 0
 fi
