@@ -22,9 +22,17 @@ DATA_DIR="${CLAUDE_PLUGIN_DATA:-/tmp}"
 LOG_ROTATION_MARKER="${DATA_DIR}/ltm_last_log_rotation"
 ARCHIVE_KEEP=7   # daily archives to retain; older ones are pruned on next rotation
 LOG_DEBUG_LOGS=(
+  "${DATA_DIR}/ltm_bootstrap_debug.log"
   "${DATA_DIR}/ltm_stop_hook_debug.log"
   "${DATA_DIR}/ltm_user_prompt_eval_debug.log"
 )
+
+# Append a timestamped line to the bootstrap debug log. Used only for tracing
+# keychain resolution failures — never blocks startup (all callers are || true).
+bootstrap_log() {
+  local msg="$1"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >> "${DATA_DIR}/ltm_bootstrap_debug.log" 2>/dev/null || true
+}
 
 # Prune archives for one log file, keeping only the newest ARCHIVE_KEEP.
 # Uses find (not a glob): bash does not expand "*" that comes from variable
@@ -108,6 +116,17 @@ case "$PROVIDER" in
     fi
     ;;
 esac
+
+# --- Step 1b: Log resolution outcome for traceability --------------------------
+# After the provider + env-var fallbacks, record whether a connection string was
+# actually obtained. If not, log the provider and whether LTM_DB_URL was set so a
+# failure is diagnosable from the debug log instead of surfacing only as a bare
+# "not configured" with no trail. All writes are best-effort; never blocks startup.
+if [ -n "$CONN" ]; then _conn_status="yes"; else _conn_status="no"; fi
+bootstrap_log "PROVIDER='${PROVIDER}' LTM_DB_URL_set=${LTM_DB_URL:+yes:-no} CONN_resolved=${_conn_status}"
+if [ -z "$CONN" ]; then
+  bootstrap_log "RESOLUTION FAILED — no connection string from provider or env; LTM will be unconfigured this session"
+fi
 
 # Final fallback for local dev / headless environments where provider unavailable.
 if [ -z "$CONN" ]; then
