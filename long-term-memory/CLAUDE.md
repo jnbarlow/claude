@@ -17,6 +17,7 @@ If you skip this step, Claude Code will keep running stale code and changes won'
 - `sql/schema_v*.sql` = incremental migration files discovered by bootstrap at runtime
 - Bootstrap checks MAX(schema_version) in DB, then applies any pending migrations sequentially
 - When adding a new migration: create the SQL file AND recompile TypeScript if you touch index.ts
+- **ALWAYS backport every migration into `sql/schema.sql`** — bump its version marker to match (line ~816: `VALUES (<n>)`) and copy the exact function/DDL changes into the inline definition. schema.sql is the fresh-install path; if a migration isn't reflected there, a clean install ships with the bug. This is easy to miss when focused on runtime migrations — treat it as part of "add a migration," not optional.
 
 ## Testing Schema & Functions (preferred over plugin mapping for most work)
 
