@@ -315,14 +315,20 @@ Fires after each assistant response completes. Evaluates whether the conversatio
 
 #### Debug Logging
 
-The Stop hook writes to a debug log file for verification:
+The Stop hook writes to a debug log file for verification. Logs live in the plugin data directory:
 
 ```bash
-# Watch in real-time
-tail -f /tmp/ltm_stop_hook_debug.log
+# Default location (also where they appear by default):
+~/.claude/plugins/data/long-term-memory/ltm_stop_hook_debug.log
 
-# View recent activity
-cat /tmp/ltm_stop_hook_debug.log | tail -20
+# Or, using the env var (equivalent path):
+${CLAUDE_PLUGIN_DATA}/ltm_stop_hook_debug.log
+```
+
+Watch in real-time:
+
+```bash
+tail -f "${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/long-term-memory}"/ltm_stop_hook_debug.log
 ```
 
 **Log format:**
@@ -345,6 +351,33 @@ cat /tmp/ltm_stop_hook_debug.log | tail -20
 | `Failed to store memory` | MCP server unavailable or LTM error |
 
 The daily counter is stored in `${CLAUDE_PLUGIN_DATA}/ltm_session_store_count` as `count|YYYY-MM-DD`. It resets itself at midnight UTC — no manual reset needed. If you ever need to raise the cap, edit the `100` limit in [scripts/stop-eval.sh](./scripts/stop-eval.sh).
+
+**Daily log rotation:** Both LTM debug logs are rotated automatically at session start (via the SessionStart hook / `bootstrap.sh`). Each day's active log is archived to `<log>.<YYYY-MM-DD>` and reset fresh; only the 7 most recent archives are kept, so neither log nor its archives grows unbounded. The rotation runs once per calendar day — same-day re-runs of bootstrap are a no-op.
+
+### UserPromptSubmit Hook Debug Logging
+
+The UserPromptSubmit hook also writes a debug log for verification:
+
+```bash
+${CLAUDE_PLUGIN_DATA}/ltm_user_prompt_eval_debug.log
+# (default: ~/.claude/plugins/data/long-term-memory/ltm_user_prompt_eval_debug.log)
+```
+
+**Log format:**
+```
+[2026-11-17 15:47:48] Relevant memories found (1) — injecting into context
+[2026-11-17 15:47:48] No relevant context — no memories matched, nothing injected
+[2026-11-17 15:47:48] No relevant context — prompt too short/empty, nothing injected
+```
+
+**Common log entries:**
+| Entry | Meaning |
+|-------|---------|
+| `Relevant memories found (N)` | N memories were judged relevant and injected into context as `additionalContext` |
+| `No relevant context — no memories matched` | Hook fired but LTM returned nothing above the score floor |
+| `No relevant context — prompt too short/empty` | Prompt was < 5 chars; hook bailed early (nothing to evaluate) |
+
+Unlike the Stop hook, this log does not record every fire on irrelevant prompts by default — it only logs when a decision is made (relevant vs. nothing), keeping noise down while still letting you confirm the hook is firing and what it decided. Logs are rotated daily alongside the Stop hook's debug log.
 
 ## Architecture
 

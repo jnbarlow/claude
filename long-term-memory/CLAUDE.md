@@ -85,3 +85,17 @@ commit: "fix(ltm): handle missing migration gracefully"
 ```
 
 **Never include `Co-Authored-By: Claude` lines** in commit messages.
+
+## Hooks & Debug Logs (dev notes)
+
+Three hooks drive proactive memory capture / recall. Each has a debug log so you can verify behavior without instrumenting the MCP server.
+
+| Hook | Script | Debug log |
+|------|--------|-----------|
+| `SessionStart` | `scripts/bootstrap.sh` | — |
+| `UserPromptSubmit` | `scripts/user-prompt-eval.sh` | `${CLAUDE_PLUGIN_DATA}/ltm_user_prompt_eval_debug.log` |
+| `Stop` (auto-store) | `scripts/stop-eval.sh` | `${CLAUDE_PLUGIN_DATA}/ltm_stop_hook_debug.log` |
+
+`${CLAUDE_PLUGIN_DATA}` defaults to `~/.claude/plugins/data/long-term-memory`. Logs are **rotated daily at session start** by `bootstrap.sh`: each active log is archived to `<log>.<YYYY-MM-DD>` and reset, keeping only the newest 7 archives. Rotation runs once per calendar day (gated by a marker file) — same-day bootstrap re-runs are a no-op. If you're debugging and want a clean slate, delete both `.log` files; they regenerate on next hook fire.
+
+**Testing hooks without a full session:** `user-prompt-eval.sh` reads JSON from stdin (`{"prompt": "..."}`) and hits the MCP server over HTTP at the port in `${CLAUDE_PLUGIN_DATA}/ltm-mcp-port.txt`. You can point it at a fake endpoint for local checks. The Stop hook similarly takes `{stop_hook_active, last_assistant_message}` on stdin.
