@@ -7,6 +7,13 @@ set -euo pipefail
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 HTTP_PORT_FILE="${CLAUDE_PLUGIN_DATA:-/tmp}/ltm-mcp-port.txt"
 
+# Debug log for verifying the UserPromptSubmit hook fires and what it decides.
+LOG_FILE="${CLAUDE_PLUGIN_DATA:-/tmp}/ltm_user_prompt_eval_debug.log"
+log_message() {
+  local msg="$1"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >> "$LOG_FILE" 2>/dev/null || true
+}
+
 # Resolve HTTP port from discovery file (written by MCP server on startup).
 if [ ! -f "$HTTP_PORT_FILE" ]; then
   exit 0  # MCP server not running or hasn't started yet.
@@ -28,6 +35,7 @@ prompt=$(echo "$json_input" | jq -r '.prompt // empty' 2>/dev/null) || true
 
 # Skip if prompt is empty or too short (< 5 characters).
 if [ -z "${prompt:-}" ] || [ ${#prompt} -lt 5 ]; then
+  log_message "No relevant context — prompt too short/empty, nothing injected"
   exit 0
 fi
 
@@ -78,7 +86,8 @@ for kw in $keywords; do
 done
 
 if [ -z "${all_results:-}" ]; then
-  exit 0  # All results filtered or no matches — noop.
+  log_message "No relevant context — no memories matched, nothing injected"
+  exit 0
 fi
 
 # --- Step 3: Deduplicate and format results ----------------------------------------
@@ -87,8 +96,13 @@ fi
 formatted_result=$(echo "$all_results" | grep -v "^---SEPARATOR---$" | sed '/^$/d' | sort -u)
 
 if [ -z "${formatted_result:-}" ]; then
+  log_message "No relevant context — results filtered out, nothing injected"
   exit 0
 fi
+
+# How many distinct memories are being injected (count unique slugs).
+inject_count=$(echo "$formatted_result" | grep -c "Slug:" || true)
+log_message "Relevant memories found (${inject_count}) — injecting into context"
 
 # Indent for readability — but limit to title/slug only (not full body).
 indented=$(echo "$formatted_result" | grep -E "Slug:|• \[" | sed 's/^/   /' | head -50)

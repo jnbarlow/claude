@@ -10,6 +10,67 @@
 
 set -euo pipefail
 
+# --- Debug log rotation (daily, at session start) -----------------------------
+# The Stop hook appends to a single debug log; without rotation that file grows
+# unbounded over months of use. Rotate here at SessionStart instead: once per
+# calendar day we move each active debug log into a dated archive and start fresh.
+# Only the most recent ARCHIVE_KEEP archives are retained so even the archives
+# can't grow forever. bootstrap.sh must always exit 0, so every call below is
+# guarded with `|| true` / an explicit return.
+
+DATA_DIR="${CLAUDE_PLUGIN_DATA:-/tmp}"
+LOG_ROTATION_MARKER="${DATA_DIR}/ltm_last_log_rotation"
+ARCHIVE_KEEP=7   # daily archives to retain; older ones are pruned on next rotation
+LOG_DEBUG_LOGS=(
+  "${DATA_DIR}/ltm_stop_hook_debug.log"
+  "${DATA_DIR}/ltm_user_prompt_eval_debug.log"
+)
+
+# Prune archives for one log file, keeping only the newest ARCHIVE_KEEP.
+# Uses find (not a glob): bash does not expand "*" that comes from variable
+# expansion, so a "${dir}/${pattern}" glob would match nothing and never prune.
+prune_archives() {
+  local dir="$1" base="$2" f delete
+  [ -d "$dir" ] || return 0
+  # Archives are named "<log>.<YYYY-MM-DD>" (always ends in a digit). The pattern
+  # matches only those dated archives — never the live "<log>.log" file itself,
+  # which would otherwise be counted as an archive and wrongly deleted.
+  mapfile -t sorted < <(find "$dir" -maxdepth 1 -type f -name "${base}.[0-9]*" | sort)
+  [ "${#sorted[@]}" -le "$ARCHIVE_KEEP" ] && return 0
+  delete=$(( ${#sorted[@]} - ARCHIVE_KEEP ))
+  rm -f -- "${sorted[@]:0:$delete}" 2>/dev/null || true
+  return 0
+}
+
+# Rotate every active debug log once per calendar day.
+rotate_debug_logs() {
+  local today marker="" f archived_name base dir
+  today=$(date '+%Y-%m-%d' 2>/dev/null) || return 0
+  [ -z "$today" ] && return 0
+
+  # Already rotated today? (marker holds the last-rotated date)
+  if [ -f "$LOG_ROTATION_MARKER" ]; then
+    marker=$(cat "$LOG_ROTATION_MARKER" 2>/dev/null) || true
+  fi
+  [ "$marker" = "$today" ] && return 0
+
+  for f in "${LOG_DEBUG_LOGS[@]}"; do
+    [ -f "$f" ] || continue
+    dir=$(dirname "$f")
+    base=$(basename "$f")
+    archived_name="${f}.${today}"
+    mv -f "$f" "$archived_name" 2>/dev/null || true
+    : > "$f" 2>/dev/null || true   # fresh empty log for today
+    prune_archives "$dir" "$base"
+  done
+
+  echo "$today" > "$LOG_ROTATION_MARKER" 2>/dev/null || true
+  return 0
+}
+
+# Rotate first thing — always runs, never blocks startup.
+rotate_debug_logs
+
 SECRET_NAME="LTM-DB"                          # Fixed across all providers.
 PROVIDER="${LTM_PROVIDER:-keychain}"           # Provider from config, defaults to keychain.
 CONN=""

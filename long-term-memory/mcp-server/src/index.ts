@@ -274,7 +274,7 @@ async function bootstrap(): Promise<{ connected: boolean; message?: string }> {
 
 // ─── MCP Server Setup ──────────────────────────────────────────────
 
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.3" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.1.4" });
 
 // Tool handler map — used by both MCP and HTTP transports.
 const TOOL_HANDLERS: Record<string, (params: Record<string, any>) => Promise<McpResult>> = {};
