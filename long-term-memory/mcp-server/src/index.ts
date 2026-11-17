@@ -36,18 +36,30 @@ const HTTP_DISCOVERY_FILE = path.join(
 // invoke destructive tools (delete/supersede/verify). /health stays open for
 // liveness checks; only POST /api/tool requires the token.
 const HTTP_AUTH_TOKEN = process.env.LTM_HTTP_AUTH_TOKEN?.trim() || "";
-function resolveHttpAuthToken(): string {
-  const dataDir = path.dirname(HTTP_DISCOVERY_FILE);
-  const authFile = path.join(dataDir, "ltm-mcp-auth.txt");
+
+// Path to the shared-secret token file, written next to the discovery/port file.
+function authFilePath(): string {
+  return path.join(path.dirname(HTTP_DISCOVERY_FILE), "ltm-mcp-auth.txt");
+}
+
+// Read a persisted token from disk, or null if none exists yet (or it's unreadable).
+// A missing file is NOT an error here — it's the normal cold-start case.
+function readPersistedAuthToken(): string | null {
   try {
-    // Prefer an explicit operator-provided token.
-    if (HTTP_AUTH_TOKEN) return HTTP_AUTH_TOKEN;
-    // Otherwise reuse a persisted token from a previous run so the hook scripts
-    // keep working across server restarts without re-reading a new secret each
-    // time. Generate one only when none exists yet.
-    const existing = fs.readFileSync(authFile, "utf8").trim();
-    if (existing) return existing;
-    const generated = crypto.randomBytes(32).toString("hex");
+    const existing = fs.readFileSync(authFilePath(), "utf8").trim();
+    return existing || null;
+  } catch {
+    return null;
+  }
+}
+
+// Generate a fresh token and persist it so hook scripts can read it back. Returns
+// the generated token, or null if persistence failed (read-only directory) — in
+// which case callers fall back to an ephemeral in-memory secret.
+function generateAndPersistAuthToken(): string | null {
+  const authFile = authFilePath();
+  const generated = crypto.randomBytes(32).toString("hex");
+  try {
     fs.writeFileSync(authFile, generated, "utf8");
     try {
       fs.chmodSync(authFile, 0o600);
@@ -55,13 +67,27 @@ function resolveHttpAuthToken(): string {
       /* chmod is best-effort on platforms that don't support it */
     }
     return generated;
-  } catch {
-    // If we cannot persist a token (read-only dir), fall back to an ephemeral
-    // in-memory secret. Requests from hook scripts will then fail auth — but the
-    // server still runs, and /health remains available for diagnostics.
-    return crypto.randomBytes(32).toString("hex");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[ltm-mcp] Could not write shared auth token to ${authFile} (${msg}); ` +
+        "using an ephemeral in-memory secret instead."
+    );
+    return null;
   }
 }
+
+function resolveHttpAuthToken(): string {
+  // Prefer an explicit operator-provided token.
+  if (HTTP_AUTH_TOKEN) return HTTP_AUTH_TOKEN;
+  // Reuse a persisted token from a previous run so hook scripts keep working
+  // across restarts without re-reading a new secret each time. Generate + persist
+  // one when none exists yet — the common cold-start case, not an error.
+  const existing = readPersistedAuthToken();
+  if (existing) return existing;
+  return generateAndPersistAuthToken() ?? crypto.randomBytes(32).toString("hex");
+}
+
 let HTTP_AUTH_SECRET = resolveHttpAuthToken();
 function isAuthed(req: http.IncomingMessage): boolean {
   const header = req.headers["x-ltm-token"];
@@ -77,30 +103,28 @@ function isAuthed(req: http.IncomingMessage): boolean {
 // Ensure the in-memory secret matches the canonical one on disk. Called after a
 // successful bind so that whoever owns the port holds the shared secret hooks
 // expect: reuse an existing file's token (so already-present tokens keep working),
-// generate one if none exists yet, and prefer an explicit operator-provided value.
+// generate + persist one if none exists yet, and prefer an explicit operator-
+// provided value. A missing file is the normal cold-start case; a read-only dir
+// falls back to an ephemeral in-memory secret.
 function reconcileHttpAuth(): void {
-  try {
-    if (HTTP_AUTH_TOKEN) return; // explicit env var wins — never overwrite the file
-    const existing = fs.readFileSync(HTTP_DISCOVERY_FILE.replace(/ltm-mcp-port\.txt$/, "ltm-mcp-auth.txt"), "utf8").trim();
-    if (existing) {
-      HTTP_AUTH_SECRET = existing;
-      console.log("[ltm-mcp] Adopted shared auth token from disk.");
-      return;
-    }
-    const generated = crypto.randomBytes(32).toString("hex");
-    fs.writeFileSync(HTTP_DISCOVERY_FILE.replace(/ltm-mcp-port\.txt$/, "ltm-mcp-auth.txt"), generated, "utf8");
-    try {
-      fs.chmodSync(HTTP_DISCOVERY_FILE.replace(/ltm-mcp-port\.txt$/, "ltm-mcp-auth.txt"), 0o600);
-    } catch {
-      /* chmod is best-effort on platforms that don't support it */
-    }
-    HTTP_AUTH_SECRET = generated;
-  } catch {
-    // If we cannot persist a token (read-only dir), fall back to an ephemeral
-    // in-memory secret. Requests from hook scripts will then fail auth — but the
-    // server still runs, and /health remains available for diagnostics.
-    HTTP_AUTH_SECRET = crypto.randomBytes(32).toString("hex");
+  // Explicit env var wins — never overwrite the file with a generated token.
+  if (HTTP_AUTH_TOKEN) return;
+  const existing = readPersistedAuthToken();
+  if (existing) {
+    HTTP_AUTH_SECRET = existing;
+    console.log("[ltm-mcp] Adopted shared auth token from disk.");
+    return;
   }
+  // Cold start: generate + persist so hook scripts have a token to read.
+  const generated = generateAndPersistAuthToken();
+  if (generated) {
+    HTTP_AUTH_SECRET = generated;
+    console.log("[ltm-mcp] Generated and persisted new shared auth token.");
+    return;
+  }
+  // Read-only directory: fall back to ephemeral in-memory secret. Server still
+  // runs, /health remains available for diagnostics — but hooks will fail auth.
+  HTTP_AUTH_SECRET = crypto.randomBytes(32).toString("hex");
 }
 
 // Detect old-style plaintext config (user pasted connection string into provider field).
