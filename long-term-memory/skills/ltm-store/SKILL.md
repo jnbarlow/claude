@@ -3,7 +3,7 @@ name: ltm-store
 description: |
   Store facts, decisions, preferences, and context into PostgreSQL long-term memory using the bundled MCP server. Use this skill when important information should be remembered across sessions.
 allowed-tools: Read
-version: "1.1.5"
+version: "1.1.6"
 tags: [memory, postgresql, storage]
 ---
 
