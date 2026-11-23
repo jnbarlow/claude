@@ -1,7 +1,7 @@
 {
   "name": "long-term-memory",
   "displayName": "Long-Term Memory (PostgreSQL)",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "Human-like memory for Claude Code. Notices patterns, forms opinions about you and your work, revises them over time — not just a fact ledger but growing understanding across sessions. Backed by PostgreSQL with tag-based recall, full-text search, supersession chains to track how knowledge evolves, and automatic session preload so Claude knows who you are from the first turn.",
   "author": {
     "name": "jnbarlow"
@@ -12,6 +12,11 @@
     "LTM_PROVIDER": {
       "title": "Secret Provider",
       "description": "Where your PostgreSQL connection string is stored at runtime. Options: aws (AWS Secrets Manager), 1password (1Password Connect Server), keychain (OS keychain — default). The secret name LTM-DB is used across all providers.",
+      "type": "string"
+    },
+    "LTM_DB_URL": {
+      "title": "Connection String",
+      "description": "Direct PostgreSQL connection string for local development or when no secrets provider is configured. This value is exposed to the bootstrap hook as CLAUDE_PLUGIN_OPTION_LTM_DB_URL and takes precedence over the secrets-provider resolution. If left blank, LTM falls back to the configured secret provider.",
       "type": "string"
     }
   },
