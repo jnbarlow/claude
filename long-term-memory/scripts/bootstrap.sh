@@ -83,7 +83,20 @@ SECRET_NAME="LTM-DB"                          # Fixed across all providers.
 PROVIDER="${LTM_PROVIDER:-keychain}"           # Provider from config, defaults to keychain.
 CONN=""
 
+# --- Step 0: Prefer the plugin option that Claude Code exposes to hook shells --
+# Plugin userConfig options are automatically available to hook command shells as
+# CLAUDE_PLUGIN_OPTION_<NAME> env vars (unlike settings.json's `env` block, which
+# does NOT reach hooks). This is the reliable local-dev path: set LTM_DB_URL in the
+# plugin config UI and bootstrap reads it directly. Falls back to a real export of
+# the same var if someone prefers exporting it instead of using the config UI.
+CONN="${CLAUDE_PLUGIN_OPTION_LTM_DB_URL:-${LTM_DB_URL:-}}"
+
 # --- Step 1: Resolve connection string from provider -------------------------
+# Only attempt secrets-provider resolution if we haven't already got a direct
+# connection string (e.g. via CLAUDE_PLUGIN_OPTION_LTM_DB_URL). This lets the
+# plugin option take precedence and avoids clobbering it with an empty result
+# when the keychain/bus lookup fails on headless systems.
+if [ -z "$CONN" ]; then
 
 case "$PROVIDER" in
   aws)
@@ -116,6 +129,8 @@ case "$PROVIDER" in
     fi
     ;;
 esac
+
+fi
 
 # --- Step 1b: Log resolution outcome for traceability --------------------------
 # After the provider + env-var fallbacks, record whether a connection string was
