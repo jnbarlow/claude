@@ -337,6 +337,47 @@ function isSlugInjected(slug: string): boolean {
   return injectedSlugs.has(slug);
 }
 
+// Daily auto-store cap. Counts *successful stores* (not Stop-hook fires), so a
+// long multi-hour session can't exhaust its budget on turns that didn't store
+// anything. Format matches bootstrap.sh's daily-rollover reset: "count|YYYY-MM-DD".
+const DAILY_STORE_LIMIT = 500;
+const STORE_COUNT_FILE = path.join(
+  process.env.CLAUDE_PLUGIN_DATA || "/tmp",
+  "ltm_session_store_count"
+);
+
+// Increment the daily store counter (best-effort — never let a failed write crash
+// a tool call). Appends a line so bootstrap.sh's date-based reset still works; it
+// only reads the last field as the date, and we keep today's count on that same
+// line. Returns void on any I/O failure.
+function incrementDailyStoreCount(): void {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    let current = 0;
+    let existingDate = "";
+    try {
+      const prev = fs.readFileSync(STORE_COUNT_FILE, "utf8").trim();
+      if (prev) {
+        current = parseInt(prev.split("|")[0], 10) || 0;
+        existingDate = prev.split("|")[1] || "";
+      }
+    } catch {
+      /* first run — no file yet */
+    }
+    // Roll over to a fresh count if the calendar day changed since last store.
+    if (existingDate !== today) current = 0;
+    const next = current + 1;
+    fs.writeFileSync(STORE_COUNT_FILE, `${next}|${today}`, "utf8");
+    if (next >= DAILY_STORE_LIMIT) {
+      console.log(`[ltm-mcp] Daily auto-store cap reached (${DAILY_STORE_LIMIT}/day).`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Swallow — a failed counter write must never break the store itself.
+    console.error(`[ltm-mcp] Could not increment daily store count (${msg}).`);
+  }
+}
+
 const handleStoreMemory = async ({ slug, category, context, title, body, tags }: any): Promise<McpResult> => {
   if (!CONNECTION_STRING) return { content: [{ type: "text" as const, text: "🧠 LTM not configured." }] };
 
@@ -351,6 +392,7 @@ const handleStoreMemory = async ({ slug, category, context, title, body, tags }:
 
   if (!result.ok) return { content: [{ type: "text" as const, text: "❌ Failed to store memory." }] };
   const fact_id = result.data?.rows[0]?.fn_store_memory;
+  incrementDailyStoreCount();
   return { content: [{ type: "text" as const, text: `🧠 Stored (fact_id=${fact_id}) ✓` }] };
 };
 
