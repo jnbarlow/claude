@@ -60,11 +60,11 @@ log_message "Daily store count: ${session_count:-0}/100"
 
 # --- Step 3: Emit a prompt for Claude to decide storage --------------------------
 # Option A: judgment lives in the model, not bash regex. We inject an additionalContext
-# prompt that (a) tells Claude this turn may contain something worth remembering and
-# (b) explicitly directs it to use the LTM PLUGIN via ltm_store_memory — NOT native
-# /memory file-based storage. The routing rule already defaults "remember" to PostgreSQL
-# when LTM_DB is configured, but a Stop-injected prompt can't assume the skill was read
-# this turn, so we name the store explicitly and forbid the native path.
+# prompt that nudges Claude to store anything genuinely worth remembering across sessions —
+# project decisions, interaction patterns or preferences of yours, debugging traps,
+# architecture insights, tooling gotchas (especially cross-project ones). Storage still goes
+# through the MCP tool (ltm_store_memory via ltm-store) so it lands in PostgreSQL; we name the
+# store explicitly because a Stop-injected prompt can't assume the skill was read this turn.
 
 # At the daily cap: only surface a notice for genuinely new items (nothing lost for
 # duplicates), so Claude can offer to reset/raise it.
@@ -75,13 +75,14 @@ if [ "${session_count:-0}" -ge 100 ]; then
 fi
 
 # Build the injection prompt. Kept short (~80 tokens) so it's near-free per turn; Claude
-# acts on it only when a store is genuinely warranted.
-INJECT_PROMPT="LTM auto-store check: This turn may contain something worth remembering across sessions (a decision, preference, or non-obvious fact). If so, call the ltm_store_memory MCP tool via the ltm-store skill to save it to PostgreSQL long-term memory. Do NOT use native Claude Code /memory file storage -- this session uses the LTM plugin for cross-session memory."
+# acts on it only when a store is genuinely warranted. Encourages breadth — project,
+# interaction, and cross-project memory — rather than tunnel vision on the current task.
+INJECT_PROMPT="LTM auto-store check: If anything from this turn is genuinely worth remembering across sessions — a project decision, how we work together or a preference of yours, a debugging trap, an architecture insight, or a tooling gotcha (especially if it'd matter in other projects too) — save it with the ltm_store_memory MCP tool via the ltm-store skill. Don't hold back over minor things; when unsure whether something's worth remembering, err toward storing it."
 
-# Emit via hookSpecificOutput.additionalContext (Stop-hook contract).
+# Emit via hookSpecificOutput (Stop-hook contract requires hookEventName + optional additionalContext).
 jq -n \
   --arg additionalContext "${INJECT_PROMPT}" \
-  '{hookSpecificOutput: {additionalContext: $additionalContext}}'
+  '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $additionalContext}}'
 
 # Increment daily store counter (preserve the date suffix so bootstrap.sh can detect a rollover and reset).
 TODAY=$(date '+%Y-%m-%d' 2>/dev/null) || true

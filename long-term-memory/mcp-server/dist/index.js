@@ -264,7 +264,7 @@ async function bootstrap() {
     }
 }
 // ─── MCP Server Setup ──────────────────────────────────────────────
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.6" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.1.7" });
 // Tool handler map — used by both MCP and HTTP transports.
 const TOOL_HANDLERS = {};
 function registerHandler(name, handler) {

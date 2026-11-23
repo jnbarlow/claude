@@ -3,7 +3,7 @@ name: ltm-retrieve
 description: |
   Query long-term memory using the bundled MCP server. Recall facts, decisions, preferences relevant to the current task.
 allowed-tools: Read, Glob
-version: "1.1.6"
+version: "1.1.7"
 tags: [memory, postgresql, recall]
 ---
 
@@ -33,7 +33,7 @@ At session start, bootstrap.sh calls `fn_session_preload(8)` and injects results
 A recency bonus (+20) is also applied to memories verified within the last 90 days. The preload output appears in hook context as `🧠 LTM: Session preload — ...`. Surface it on first turn per the rules above.
 
 ## Routing Rule (Decision 3.5)
-When `LTM_DB` is configured, all "remember" commands default to PostgreSQL LTM via the ltm-store skill. To explicitly use native Claude Code file-based memory instead, invoke `/memory [text]`. The presence of `$LTM_DB` config is the signal — no special phrases needed. When absent, fall back to native Claude Code memory behavior unchanged.
+When `LTM_DB` is configured, recall and session preload come from PostgreSQL LTM — this is where durable memories live so they travel across sessions and projects. The presence of `$LTM_DB` config is the signal; when absent, fall back to native Claude Code memory behavior unchanged.
 
 ## Lookup Strategy (Decision 4.0)
 
