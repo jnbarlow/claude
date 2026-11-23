@@ -298,7 +298,7 @@ async function bootstrap(): Promise<{ connected: boolean; message?: string }> {
 
 // ─── MCP Server Setup ──────────────────────────────────────────────
 
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.6" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.1.7" });
 
 // Tool handler map — used by both MCP and HTTP transports.
 const TOOL_HANDLERS: Record<string, (params: Record<string, any>) => Promise<McpResult>> = {};
@@ -337,6 +337,11 @@ function isSlugInjected(slug: string): boolean {
   return injectedSlugs.has(slug);
 }
 
+// Daily auto-store cap. Counts *successful stores* (not Stop-hook fires), so a
+// long multi-hour session can't exhaust its budget on turns that didn't store
+// anything. Format matches bootstrap.sh's daily-rollover reset: "count|YYYY-MM-DD".
+import { incrementDailyStoreCount } from "./store-counter.js";
+
 const handleStoreMemory = async ({ slug, category, context, title, body, tags }: any): Promise<McpResult> => {
   if (!CONNECTION_STRING) return { content: [{ type: "text" as const, text: "🧠 LTM not configured." }] };
 
@@ -351,6 +356,7 @@ const handleStoreMemory = async ({ slug, category, context, title, body, tags }:
 
   if (!result.ok) return { content: [{ type: "text" as const, text: "❌ Failed to store memory." }] };
   const fact_id = result.data?.rows[0]?.fn_store_memory;
+  incrementDailyStoreCount();
   return { content: [{ type: "text" as const, text: `🧠 Stored (fact_id=${fact_id}) ✓` }] };
 };
 

@@ -1,22 +1,26 @@
 {
   "name": "ltm-postgres-mcp",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "MCP server for LTM plugin — PostgreSQL long-term memory operations via stored procedures",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "jest"
   },
   "type": "module",
   "private": true,
   "dependencies": {
-    "@1password/connect":            "^1.4.x",
+    "@1password/connect": "^1.4.x",
     "@aws-sdk/client-secrets-manager": "^3.x",
-    "@modelcontextprotocol/sdk":      "^1.12.1",
-    "keytar":                        "^7.9.x",
-    "pg":                            "^8.13.0"
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "keytar": "^7.9.x",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.0.0",
     "@types/pg": "^8.11.0",
-    "@types/node": "^22.0.0"
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.15",
+    "typescript": "^5.9.3"
   }
 }

@@ -264,7 +264,7 @@ async function bootstrap() {
     }
 }
 // ─── MCP Server Setup ──────────────────────────────────────────────
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.6" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.1.7" });
 // Tool handler map — used by both MCP and HTTP transports.
 const TOOL_HANDLERS = {};
 function registerHandler(name, handler) {
@@ -295,6 +295,10 @@ function filterInjectedResults(rows, slugField = "slug") {
 function isSlugInjected(slug) {
     return injectedSlugs.has(slug);
 }
+// Daily auto-store cap. Counts *successful stores* (not Stop-hook fires), so a
+// long multi-hour session can't exhaust its budget on turns that didn't store
+// anything. Format matches bootstrap.sh's daily-rollover reset: "count|YYYY-MM-DD".
+import { incrementDailyStoreCount } from "./store-counter.js";
 const handleStoreMemory = async ({ slug, category, context, title, body, tags }) => {
     if (!CONNECTION_STRING)
         return { content: [{ type: "text", text: "🧠 LTM not configured." }] };
@@ -305,6 +309,7 @@ const handleStoreMemory = async ({ slug, category, context, title, body, tags })
     if (!result.ok)
         return { content: [{ type: "text", text: "❌ Failed to store memory." }] };
     const fact_id = result.data?.rows[0]?.fn_store_memory;
+    incrementDailyStoreCount();
     return { content: [{ type: "text", text: `🧠 Stored (fact_id=${fact_id}) ✓` }] };
 };
 server.tool("ltm_store_memory", { slug: z.string(), category: z.string(), context: z.string(), title: z.string(), body: z.string(), tags: z.array(z.string()).optional() }, handleStoreMemory);

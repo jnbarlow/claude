@@ -3,7 +3,7 @@ name: ltm-store
 description: |
   Store facts, decisions, preferences, and context into PostgreSQL long-term memory using the bundled MCP server. Use this skill when important information should be remembered across sessions.
 allowed-tools: Read
-version: "1.1.6"
+version: "1.1.7"
 tags: [memory, postgresql, storage]
 ---
 
@@ -213,7 +213,7 @@ Always provide feedback on storage actions (Decision 3.3):
 
 ## Routing Rule
 
-When plugin is active (`LTM_DB` configured), all "remember" commands default to PostgreSQL LTM. To explicitly use native Claude Code file-based memory instead, invoke `/memory [text]`. The presence of `LTM_DB` config is the signal — no special phrases needed (Decision 3.5).
+When plugin is active (`LTM_DB` configured), all "remember" commands default to PostgreSQL LTM via the ltm-store skill — this is where durable memories live so they travel across sessions and projects. If you ever write something to native Claude Code file-based memory instead, also store it in LTM when it's generic enough to matter outside this repo (a debugging trap, architecture pattern, or tooling gotcha); local notes don't cross repositories, but LTM does.
 
 ---
 
