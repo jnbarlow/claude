@@ -24,7 +24,7 @@ if (PROVIDER.startsWith("postgresql://") || PROVIDER.startsWith("postgres://")) 
 }
 
 // Register all tools synchronously — they're ready the moment this module loads.
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.8" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.2.1" });
 registerOnServer(server, buildToolDefinitions());
 
 async function main(): Promise<void> {

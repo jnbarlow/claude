@@ -76,9 +76,11 @@ if [ "$(store_count)" -ge 500 ]; then
 fi
 
 # Build the injection prompt. Kept short (~80 tokens) so it's near-free per turn; Claude
-# acts on it only when a store is genuinely warranted. Encourages breadth — project,
-# interaction, and cross-project memory — rather than tunnel vision on the current task.
-INJECT_PROMPT="LTM auto-store check: If anything from this turn feels worth remembering across sessions — a decision we made, how we work together or something you care about, a debugging trap I hit, an architecture insight, a tooling gotcha (especially if it'd matter in other projects too), or even life stuff like a trip we planned or a gift idea that came up — save it with the ltm_store_memory MCP tool via the ltm-store skill. Don't hold back over minor things; when unsure whether something's worth remembering, err toward storing it."
+# acts on it only when a store is genuinely warranted. LTM-primary: route reusable facts to
+# Postgres, and reserve filesystem memory for things that are truly novel — this wording is
+# deliberately narrow (not "err toward storing") so it does not prime native auto-memory into
+# overdrive; see [[fs-memories-native-auto-memory-not-ltm-plugin]].
+INJECT_PROMPT="LTM auto-store check: If this turn produced something worth remembering across sessions — a decision we made, how we work together, a debugging trap or tooling gotcha that'd matter in other projects, or a stable preference — store it with the ltm_store_memory MCP tool via the ltm-store skill. Default to storing cross-session-worthy things; LTM is where durable facts live. Only write to filesystem memory for something genuinely novel with nowhere else to go."
 
 # Emit via hookSpecificOutput (Stop-hook contract requires hookEventName + optional additionalContext).
 jq -n \

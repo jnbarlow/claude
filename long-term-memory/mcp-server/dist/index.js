@@ -19,7 +19,7 @@ if (PROVIDER.startsWith("postgresql://") || PROVIDER.startsWith("postgres://")) 
         "\n   Or export LTM_DB_URL as an environment variable for local development.");
 }
 // Register all tools synchronously — they're ready the moment this module loads.
-const server = new McpServer({ name: "ltm-postgres", version: "1.1.8" });
+const server = new McpServer({ name: "ltm-postgres", version: "1.2.1" });
 registerOnServer(server, buildToolDefinitions());
 async function main() {
     // Resolve connection string from configured provider (variable latency).
