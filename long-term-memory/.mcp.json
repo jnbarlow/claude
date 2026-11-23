@@ -5,6 +5,7 @@
       "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.sh"],
       "env": {
         "LTM_PROVIDER": "${user_config.LTM_PROVIDER}",
+        "LTM_DB_URL": "${user_config.LTM_DB_URL}",
         "LTM_HTTP_PORT": "58600"
       }
     }
