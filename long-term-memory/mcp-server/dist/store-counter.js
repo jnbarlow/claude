@@ -50,17 +50,18 @@ export function readStoreCount(file) {
 export function incrementDailyStoreCount(file = path.join(process.env.CLAUDE_PLUGIN_DATA || "/tmp", "ltm_session_store_count"), today = new Date().toISOString().slice(0, 10)) {
     // Read the existing count. A missing file (first run) or unreadable directory is
     // not an error here — it just means we start at zero.
-    let next;
+    let current = 0;
     try {
         const content = fs.readFileSync(file, "utf8");
-        next = computeNextStoreCount(content, today).count;
+        const parsed = parseStoreCount(content);
+        current = parsed.date !== today ? 0 : parsed.count;
     }
     catch (err) {
         if (err.code !== "ENOENT") {
             console.error(`[ltm-mcp] Could not read daily store count (${err.message}).`);
         }
-        next = 0;
     }
+    const next = current + 1;
     // Persist the new count. A write failure must never break the store itself, so we
     // swallow it — but log it so a misconfigured data dir is visible in the debug logs.
     try {
